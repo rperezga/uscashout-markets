@@ -3437,7 +3437,7 @@ app.get('/', (req, res) => {
 
 // Iniciar el servidor
 const server = app.listen(PORT, HOST, () => {
-    console.log(`XRP Dashboard Server v2.7 running on http://${HOST}:${PORT}${IS_PROD ? ' (modo PRODUCCIÓN: cookie Secure + HSTS)' : ''}`);
+    console.log(`USCashout Markets (crypto dashboard) v2.7 running on http://${HOST}:${PORT}${IS_PROD ? ' (modo PRODUCCIÓN: cookie Secure + HSTS)' : ''}`);
 });
 
 // ===== V2.6: ROBUSTEZ DEL PROCESO (necesario para correr bajo pm2) =====

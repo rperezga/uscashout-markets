@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XRP Analytics Dashboard 2.0</title>
-    <meta name="description" content="Dashboard de análisis para XRP: resumen ejecutivo, mercado, on-chain, ballenas y quema en tiempo real.">
+    <title>USCashout Markets — Panel cripto multi-moneda</title>
+    <meta name="description" content="USCashout Markets: panel de análisis cripto multi-moneda (XRP, XLM, HBAR, ALGO y más) — resumen ejecutivo, mercado, derivados, on-chain, ballenas y quema en tiempo real.">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%230f172a'/%3E%3Ctext x='16' y='22' font-size='15' font-weight='bold' text-anchor='middle' fill='%230ea5e9' font-family='Arial'%3EX%3C/text%3E%3C/svg%3E">
     <!-- Google Fonts para dar un diseño premium a la tipografía -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
@@ -24,7 +24,7 @@
     <div class="app-container">
         <header class="app-header">
             <div class="header-left">
-                <h1>XRP Analytics <span class="version-tag">2.6</span></h1>
+                <h1>USCashout Markets <span class="version-tag">2.7</span></h1>
                 <!-- V2.5: selector de moneda (ISO 20022 + BTC/ETH). Poblado desde /api/coins. -->
                 <select id="coin-selector" class="coin-selector" title="Moneda activa del dashboard" data-i18n-title="coin.titulo" style="display:none;"></select>
                 <!-- Precio siempre visible, en cualquier tab -->
@@ -96,7 +96,7 @@
         <!-- ============ V2.3: OVERLAY DE AUTENTICACIÓN ============ -->
         <div id="auth-overlay" class="auth-overlay" style="display:none;">
             <div class="auth-card glass-effect">
-                <h2>XRP Analytics <span class="version-tag">2.6</span></h2>
+                <h2>USCashout Markets <span class="version-tag">2.7</span></h2>
                 <h3 id="auth-title" data-i18n="auth.titulo">Iniciar sesión</h3>
                 <p class="auth-sub" data-i18n="auth.subtitulo">Tu dashboard está protegido: los datos de tu portafolio y tus ajustes viven detrás de tu cuenta.</p>
                 <form id="auth-form" autocomplete="on">
@@ -726,7 +726,7 @@
 
     <!-- Script principal de la aplicación -->
     <!-- V2.3: i18n debe cargar ANTES de app.js (app.js usa window.t) -->
-    <script src="i18n.js?v=5"></script>
-    <script src="app.js?v=24"></script>
+    <script src="i18n.js?v=6"></script>
+    <script src="app.js?v=25"></script>
 </body>
 </html>

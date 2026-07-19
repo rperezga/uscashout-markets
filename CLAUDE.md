@@ -1,5 +1,8 @@
 # CLAUDE.md — Guía para trabajar en este proyecto
 
+> **Marca pública (v2.7)**: la app se publica como **USCashout Markets** en `uscashout.com`
+> (panel cripto multi-moneda; XRP sigue siendo la moneda principal y la ruta legacy intacta).
+
 Contexto esencial para que Claude (o cualquier asistente/dev) trabaje en el XRP Analytics Dashboard sin romper nada.
 
 ## Qué es

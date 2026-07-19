@@ -1,4 +1,4 @@
-// XRP Analytics Dashboard 2.x — frontend
+// USCashout Markets (dashboard cripto multi-moneda) 2.x — frontend
 document.addEventListener('DOMContentLoaded', loadDashboardData);
 
 // V2.3: shim de i18n — si i18n.js no cargó por lo que sea, t() devuelve el español
@@ -1181,7 +1181,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (anyEnabled && 'Notification' in window) {
                 const perm = await Notification.requestPermission();
                 if (perm === 'granted') {
-                    new Notification(t('al.testTitulo', 'XRP Analytics — Alertas activadas'), { body: t('al.testCuerpo', 'Te avisaremos aquí cuando se cumplan las condiciones que elegiste. Mantén esta pestaña abierta.') });
+                    new Notification(t('al.testTitulo', 'USCashout Markets — Alertas activadas'), { body: t('al.testCuerpo', 'Te avisaremos aquí cuando se cumplan las condiciones que elegiste. Mantén esta pestaña abierta.') });
                     if (noteEl) noteEl.textContent = t('al.guardadoTest', 'Guardado. Notificación de prueba enviada.');
                 } else if (noteEl) {
                     noteEl.textContent = t('al.guardadoBloqueado', 'Guardado, pero las notificaciones están bloqueadas — actívalas en la configuración del navegador para este sitio.');

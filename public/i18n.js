@@ -143,7 +143,7 @@
         // --- Alertas (dinámico) ---
         'al.intro': 'Native browser notifications (Notification API). They only work while this tab stays open and polling data — there is no push notification server. Settings are stored in your browser (localStorage) and never leave your machine.',
         'al.whalePre': 'Net exchange flow exceeds',
-        'al.testTitulo': 'XRP Analytics — Alerts enabled',
+        'al.testTitulo': 'USCashout Markets — Alerts enabled',
         'al.testCuerpo': "We'll notify you here when your chosen conditions are met. Keep this tab open.",
         'al.guardadoTest': 'Saved. Test notification sent.',
         'al.guardadoBloqueado': 'Saved, but notifications are blocked — enable them in your browser settings for this site.',
