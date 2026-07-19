@@ -1,0 +1,18 @@
+# Dependencias
+node_modules/
+
+# Claves privadas — nunca subir a git
+.env
+
+# Estado local generado por el servidor (se regenera solo al arrancar)
+data.json
+history.json
+
+# V2.3: base de datos local con usuarios/sesiones — NUNCA subir a git
+dashboard.db
+dashboard-db.json
+docs/test-output.txt
+
+# Sistema
+.DS_Store
+Thumbs.db

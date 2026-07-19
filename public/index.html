@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XRP Analytics Dashboard 2.0</title>
+    <meta name="description" content="Dashboard de análisis para XRP: resumen ejecutivo, mercado, on-chain, ballenas y quema en tiempo real.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%230f172a'/%3E%3Ctext x='16' y='22' font-size='15' font-weight='bold' text-anchor='middle' fill='%230ea5e9' font-family='Arial'%3EX%3C/text%3E%3C/svg%3E">
+    <!-- Google Fonts para dar un diseño premium a la tipografía -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=11">
+    <!-- Chart.js — V2.7: SELF-HOSTED (antes CDN con versión fijada; antes de eso, sin versión):
+         cogía SIEMPRE la última publicada, así que un cambio mayor en Chart.js podía
+         romper el dashboard sin que tocáramos una línea de código.
+         PENDIENTE (recomendado antes de exponer): self-hostear el fichero para no
+         depender del CDN y poder cerrar la CSP a 'self':
+           npm pack chart.js@4.4.7   (o descargar la URL de abajo)
+           → guardar como public/vendor/chart.umd.min.js
+           → cambiar este src a "vendor/chart.umd.min.js"
+           → quitar cdn.jsdelivr.net de script-src en la CSP (server.js) -->
+    <script src="vendor/chart.umd.min.js?v=4.4.7"></script>
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="header-left">
+                <h1>XRP Analytics <span class="version-tag">2.6</span></h1>
+                <!-- V2.5: selector de moneda (ISO 20022 + BTC/ETH). Poblado desde /api/coins. -->
+                <select id="coin-selector" class="coin-selector" title="Moneda activa del dashboard" data-i18n-title="coin.titulo" style="display:none;"></select>
+                <!-- Precio siempre visible, en cualquier tab -->
+                <div id="header-price-chip" class="header-price-chip" title="Precio de la moneda activa (se actualiza con cada ciclo)" data-i18n-title="header.priceTitle">
+                    <span id="header-price">$--</span>
+                    <span id="header-price-change" class="header-price-change">--%</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button id="refresh-data-btn" class="refresh-btn" data-i18n="btn.refrescar">
+                    <span class="refresh-icon">🔄</span> Refrescar
+                </button>
+                <button id="alerts-config-btn" class="refresh-btn" title="Configurar alertas locales del navegador" data-i18n="btn.alertas" data-i18n-title="btn.alertasTitle">
+                    <span class="refresh-icon">🔔</span> Alertas
+                </button>
+                <!-- V2.3: cambio de idioma ES/EN -->
+                <button id="lang-toggle-btn" class="refresh-btn" title="Cambiar idioma / Switch language">🌐 EN</button>
+                <!-- V2.3: sesión -->
+                <div id="user-chip" class="user-chip" style="display:none;">
+                    <button id="account-btn" class="account-btn" title="Cambiar contraseña" data-i18n-title="acc.cambiar">
+                        <span id="user-chip-name">--</span> ⚙
+                    </button>
+                    <button id="logout-btn" class="logout-btn" data-i18n="btn.salir" title="Cerrar sesión" data-i18n-title="btn.salirTitle">Salir</button>
+                </div>
+                <p id="global-update-time"></p>
+            </div>
+        </header>
+
+        <!-- ============ V2.4: NAVEGACIÓN AGRUPADA (fila propia) ============
+             El data-i18n va en el span interno (.nav-lbl) para que el motor i18n
+             no borre el icono al reemplazar innerHTML. Los IDs de tab existentes
+             (dashboard, analysis, whale-tracker, supply-dist, burn-impact) se
+             conservan: app.js y el auto-refresh del tab Quema dependen de ellos. -->
+        <nav class="app-nav" id="app-nav" aria-label="Secciones del dashboard">
+            <div class="nav-group">
+                <span class="nav-group-label" data-i18n="nav.grpInicio">Inicio</span>
+                <div class="nav-group-btns">
+                    <button class="nav-btn active" data-tab="resumen"><span class="nav-ico">🧭</span><span class="nav-lbl" data-i18n="nav.resumen">Resumen</span></button>
+                </div>
+            </div>
+            <div class="nav-sep"></div>
+            <div class="nav-group">
+                <span class="nav-group-label" data-i18n="nav.grpMercado">Mercado</span>
+                <div class="nav-group-btns">
+                    <button class="nav-btn" data-tab="dashboard"><span class="nav-ico">📊</span><span class="nav-lbl" data-i18n="nav.mercado">Mercado</span></button>
+                    <button class="nav-btn" data-tab="news"><span class="nav-ico">📰</span><span class="nav-lbl" data-i18n="nav.noticias">Noticias</span></button>
+                    <button class="nav-btn" data-tab="derivatives"><span class="nav-ico">📈</span><span class="nav-lbl" data-i18n="nav.derivados">Derivados</span></button>
+                </div>
+            </div>
+            <div class="nav-sep"></div>
+            <div class="nav-group">
+                <span class="nav-group-label" data-i18n="nav.grpAnalisis">Análisis</span>
+                <div class="nav-group-btns">
+                    <button class="nav-btn" data-tab="analysis"><span class="nav-ico">🎯</span><span class="nav-lbl" data-i18n="nav.analisis">Análisis</span></button>
+                    <button class="nav-btn" data-tab="technical"><span class="nav-ico">📐</span><span class="nav-lbl" data-i18n="nav.tecnico">Técnico</span></button>
+                </div>
+            </div>
+            <div class="nav-sep"></div>
+            <div class="nav-group">
+                <span class="nav-group-label" data-i18n="nav.grpOnchain">On-Chain</span>
+                <div class="nav-group-btns">
+                    <button class="nav-btn" data-tab="whale-tracker" data-xrp-only><span class="nav-ico">🐋</span><span class="nav-lbl" data-i18n="nav.ballenas">Ballenas</span></button>
+                    <button class="nav-btn" data-tab="supply-dist"><span class="nav-ico">🪙</span><span class="nav-lbl" data-i18n="nav.suministro">Suministro</span></button>
+                    <button class="nav-btn" data-tab="burn-impact" data-xrp-only><span class="nav-ico">🔥</span><span class="nav-lbl" data-i18n="nav.quema">Quema en Vivo</span></button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- ============ V2.3: OVERLAY DE AUTENTICACIÓN ============ -->
+        <div id="auth-overlay" class="auth-overlay" style="display:none;">
+            <div class="auth-card glass-effect">
+                <h2>XRP Analytics <span class="version-tag">2.6</span></h2>
+                <h3 id="auth-title" data-i18n="auth.titulo">Iniciar sesión</h3>
+                <p class="auth-sub" data-i18n="auth.subtitulo">Tu dashboard está protegido: los datos de tu portafolio y tus ajustes viven detrás de tu cuenta.</p>
+                <form id="auth-form" autocomplete="on">
+                    <label for="auth-username" data-i18n="auth.usuario">Usuario</label>
+                    <input id="auth-username" name="username" type="text" autocomplete="username" minlength="3" maxlength="30" required>
+                    <label for="auth-password" data-i18n="auth.password">Contraseña</label>
+                    <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="8" required>
+                    <div id="auth-error" class="auth-error" style="display:none;"></div>
+                    <button type="submit" id="auth-submit" data-i18n="auth.entrar">Entrar</button>
+                </form>
+                <button id="auth-mode-toggle" class="auth-mode-toggle" data-i18n="auth.toggleRegistro">¿No tienes cuenta? Regístrate</button>
+                <p id="auth-first-note" class="auth-note" style="display:none;" data-i18n="auth.primerUsuario">La primera cuenta creada queda como propietaria de este dashboard.</p>
+                <p class="auth-note" data-i18n="auth.localNote">Corre en tu máquina (localhost). Las contraseñas se guardan cifradas (scrypt), nunca en texto plano.</p>
+            </div>
+        </div>
+
+        <!-- ============ NUEVO TAB: RESUMEN (vista de 10 segundos) ============ -->
+        <div id="resumen-tab" class="tab-content active">
+            <div class="resumen-container">
+                <!-- Hero: lo esencial de un vistazo -->
+                <section class="resumen-hero glass-effect" id="resumen-hero">
+                    <div class="hero-price-block">
+                        <div class="hero-label" id="hero-coin-label" data-i18n="hero.xrpAhora">XRP ahora</div>
+                        <div class="hero-price-row">
+                            <span class="hero-price" id="hero-price">$--</span>
+                            <span class="variation-badge badge-up" id="hero-change">--</span>
+                        </div>
+                        <div class="hero-sub" id="hero-sub" data-i18n="hero.cargando">Cargando datos...</div>
+                    </div>
+                    <div class="hero-spark-block">
+                        <canvas id="heroSparkline"></canvas>
+                        <div class="hero-spark-label" data-i18n="hero.ult30d">Últimos 30 días</div>
+                    </div>
+                    <div class="hero-chips" id="hero-chips">
+                        <!-- Chips (score, F&G, escrow, rango) inyectados desde app.js -->
+                    </div>
+                </section>
+
+                <div class="resumen-grid">
+                    <!-- Veredicto + señales en lenguaje llano -->
+                    <section class="glass-effect resumen-senales">
+                        <h3 data-i18n="resumen.encristiano">El mercado de XRP, en cristiano</h3>
+                        <div id="brief-headline"><!-- Veredicto global --></div>
+                        <div id="brief-signals" class="brief-signals"><!-- Señales por área --></div>
+                        <p class="resumen-disclaimer" data-i18n="resumen.disclaimer">Señales educativas generadas por reglas sobre datos públicos — no es asesoramiento financiero.</p>
+                    </section>
+
+                    <!-- Columna derecha: niveles, derivados, ecosistema -->
+                    <div class="resumen-col">
+                        <section class="glass-effect resumen-box">
+                            <h3 data-i18n="resumen.niveles">Niveles a vigilar</h3>
+                            <div id="brief-levels"></div>
+                        </section>
+                        <section class="glass-effect resumen-box">
+                            <h3 data-i18n="resumen.derivados">Derivados <span class="mini-src">Kraken + OKX</span></h3>
+                            <div id="brief-derivatives"></div>
+                        </section>
+                        <section class="glass-effect resumen-box" data-xrp-only>
+                            <h3 data-i18n="resumen.ecosistema">Ecosistema <span class="mini-src">CoinGecko</span></h3>
+                            <div id="brief-ecosystem"></div>
+                        </section>
+                    </div>
+                </div>
+
+                <!-- Frescura de fuentes: qué tan actuales son los datos que estás viendo -->
+                <section class="glass-effect resumen-fuentes">
+                    <div id="brief-quality" class="brief-quality"></div>
+                </section>
+            </div>
+        </div>
+
+        <!-- ============ TAB: MERCADO (V2.4: aligerado — noticias, escrow,
+             proyecciones, derivados, ecosistema, ETFs y AMM viven ahora en
+             sus propias páginas; los IDs de las cards NO cambian) ============ -->
+        <div id="dashboard-tab" class="tab-content">
+            <main class="dashboard-grid">
+            <!-- Filas 1-2, Col 1-2 -->
+            <section id="market-data" class="card glass-effect" style="grid-column: span 2; grid-row: span 2;">
+                <h2 data-i18n="card.marketData">Datos de Mercado</h2>
+                <div class="card-content"></div>
+            </section>
+
+            <!-- Filas 1-2, Col 3-4 -->
+            <section id="my-crypto" class="card glass-effect" style="grid-column: span 2; grid-row: span 2;">
+                <h2>My Crypto</h2>
+                <div class="card-content"></div>
+            </section>
+
+            <!-- Columna Derecha completa (Filas 1-6, Col 5-6): la gráfica gana altura -->
+            <section id="price-chart-section" class="card glass-effect" style="grid-column: span 2; grid-row: span 6; display: flex; flex-direction: column;">
+                <h2 data-i18n="card.priceChart">Gráfica de Precio</h2>
+                <div class="chart-container" style="flex: 1; position: relative; height: 100%; min-height: 0; padding: 0.5rem; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column;">
+                    <div class="chart-timeline-selector">
+                        <button class="timeline-btn" data-days="1">1D</button>
+                        <button class="timeline-btn" data-days="7">7D</button>
+                        <button class="timeline-btn" data-days="30">1M</button>
+                        <button class="timeline-btn active" data-days="365">1Y</button>
+                    </div>
+                    <div style="flex: 1; position: relative; width: 100%; min-height: 120px;">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                </div>
+                <div id="price-chart-reading"><!-- Lectura práctica inyectada desde app.js --></div>
+            </section>
+
+            <!-- Filas 3-4, Col 1-2 (XRPL-only: para otras monedas se oculta) -->
+            <section id="onchain-data" class="card glass-effect" data-xrp-only style="grid-column: span 2; grid-row: span 2;">
+                <h2 data-i18n="card.onChain">Datos On-Chain</h2>
+                <div class="card-content"></div>
+            </section>
+
+            <!-- Filas 3-4, Col 3-4 -->
+            <section id="market-pressure" class="card glass-effect" style="grid-column: span 2; grid-row: span 2;">
+                <h2><span data-i18n="card.pressure">Buy/Sell Pressure</span> <span class="mini-src" data-i18n="src.binanceSpot">Binance spot</span></h2>
+                <div class="card-content"></div>
+            </section>
+
+            <!-- Filas 5-6, Col 1-4: volumen por exchange a lo ancho -->
+            <section id="exchange-volume-card" class="card glass-effect" style="grid-column: span 4; grid-row: span 2;">
+                <h2><span data-i18n="card.volumen">Volumen por Exchange</span> <span class="mini-src" data-i18n="src.datoReal">dato real</span></h2>
+                <div class="card-content"></div>
+            </section>
+        </main>
+        </div>
+
+        <!-- ============ V2.4 TAB NUEVO: NOTICIAS (antes card compacta en Mercado) ============ -->
+        <div id="news-tab" class="tab-content">
+            <div class="news-page-container">
+                <section id="latest-news" class="card glass-effect news-page-card">
+                    <h2><span data-i18n="card.noticias">Noticias e Impacto</span> <span class="mini-src" data-i18n="src.noticias" data-xrp-only>XRP primero · macro etiquetado</span></h2>
+                    <div class="card-content" id="news-container" style="overflow-y: auto; padding-right: 5px;"></div>
+                </section>
+            </div>
+        </div>
+
+        <!-- ============ V2.4 TAB NUEVO: DERIVADOS & ECOSISTEMA ============
+             OJO: la clase del contenedor es deriv-page-grid, NO deriv-grid —
+             esa ya existe y es el mini-grid interno de la card de derivados. -->
+        <div id="derivatives-tab" class="tab-content">
+            <main class="deriv-page-grid">
+                <section id="derivatives-card" class="card glass-effect">
+                    <h2><span data-i18n="card.derivados">Derivados</span> <span class="mini-src">Kraken + OKX</span></h2>
+                    <div class="card-content"></div>
+                </section>
+
+                <section id="ecosystem-card" class="card glass-effect" data-xrp-only>
+                    <h2><span data-i18n="card.ecosistema">Ecosistema XRP</span> <span class="mini-src" data-i18n="src.rlusd">RLUSD · dominancias</span></h2>
+                    <div class="card-content"></div>
+                </section>
+
+                <!-- V2.2 — ETFs spot de XRP (roadmap #1): nodo manual-actualizable, sin API gratuita conocida -->
+                <section id="etf-flows-card" class="card glass-effect" data-xrp-only>
+                    <h2><span data-i18n="card.etf">ETFs Spot de XRP</span> <span class="mini-src" data-i18n="src.manual">actualización manual</span></h2>
+                    <div class="card-content"></div>
+                </section>
+
+                <!-- V2.2 (roadmap #13): actividad AMM/DEX on-chain, muestra de pools vía XRPScan -->
+                <section id="amm-dex-card" class="card glass-effect" data-xrp-only>
+                    <h2><span data-i18n="card.amm">Actividad AMM/DEX</span> <span class="mini-src" data-i18n="src.muestra">XRPL on-chain · muestra</span></h2>
+                    <div class="card-content"></div>
+                </section>
+            </main>
+        </div>
+
+        <!-- Vista: Análisis de Inversión (V2.4: score + insights + proyecciones;
+             las métricas técnicas puras viven ahora en el tab Técnico) -->
+        <div id="analysis-tab" class="tab-content">
+            <div class="supply-overview-container">
+                <div class="analysis-grid">
+                    <!-- Score Compuesto -->
+                    <div class="supply-section glass-effect analysis-span-2">
+                        <h3 data-i18n="an.score">Score de Inversión (Educativo)</h3>
+                        <div id="analysis-score"><p class="analysis-loading">Calculando métricas...</p></div>
+                    </div>
+
+                    <!-- V2.2 (roadmap #7): evolución del score día a día, usa history.json
+                         (histórico solo de XRP: oculto para otras monedas) -->
+                    <div class="supply-section glass-effect analysis-span-2" data-xrp-only>
+                        <h3><span data-i18n="an.scoreEvo">Evolución del Score</span> <span class="mini-src" data-i18n="src.historico">histórico diario</span></h3>
+                        <div style="height:110px;"><canvas id="scoreSparkline"></canvas></div>
+                        <div id="score-sparkline-note" class="flow-coverage"><!-- Cobertura del histórico --></div>
+                    </div>
+
+                    <!-- Insights -->
+                    <div class="supply-section glass-effect analysis-span-2">
+                        <h3 data-i18n="an.insights">Insights Automáticos</h3>
+                        <div id="analysis-insights"><p class="analysis-loading">Generando insights...</p></div>
+                    </div>
+
+                    <!-- V2.4: Proyecciones (antes card en Mercado) — conserva la
+                         estructura interna .card-content que app.js espera -->
+                    <div id="projections" class="supply-section glass-effect analysis-span-2">
+                        <h3 data-i18n="card.proyecciones">Proyecciones</h3>
+                        <div class="card-content"></div>
+                    </div>
+                </div>
+                <div class="analysis-disclaimer" data-i18n="an.disclaimer">
+                    ⚠️ Todas las métricas y señales de esta pestaña son <strong>educativas</strong>, calculadas con reglas técnicas sobre datos públicos. No constituyen asesoramiento financiero.
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ V2.4 TAB NUEVO: TÉCNICO (antes parte de Análisis) ============ -->
+        <div id="technical-tab" class="tab-content">
+            <div class="supply-overview-container">
+                <div class="analysis-grid">
+                    <!-- Tendencia y Momentum -->
+                    <div class="supply-section glass-effect">
+                        <h3 data-i18n="an.tendencia">Tendencia &amp; Momentum</h3>
+                        <div id="analysis-trend"></div>
+                    </div>
+
+                    <!-- Riesgo -->
+                    <div class="supply-section glass-effect">
+                        <h3 data-i18n="an.riesgo">Métricas de Riesgo</h3>
+                        <div id="analysis-risk"></div>
+                    </div>
+
+                    <!-- Rendimiento -->
+                    <div class="supply-section glass-effect">
+                        <h3 data-i18n="an.rendimiento">Rendimiento &amp; Rango 52s</h3>
+                        <div id="analysis-perf"></div>
+                    </div>
+
+                    <!-- Correlación y Liquidez (fase 1 multi-moneda: solo XRP calcula
+                         correlaciones — costarían llamadas extra de CoinGecko por moneda) -->
+                    <div class="supply-section glass-effect" data-xrp-only>
+                        <h3 data-i18n="an.correlacion">Correlación BTC &amp; Liquidez</h3>
+                        <div id="analysis-corr"></div>
+                    </div>
+                </div>
+                <div class="analysis-disclaimer" data-i18n="an.disclaimer">
+                    ⚠️ Todas las métricas y señales de esta pestaña son <strong>educativas</strong>, calculadas con reglas técnicas sobre datos públicos. No constituyen asesoramiento financiero.
+                </div>
+            </div>
+        </div>
+
+        <!-- Vista: Ballenas (Whale Tracker) -->
+        <div id="whale-tracker-tab" class="tab-content">
+            <div class="whale-tracker-container">
+                <!-- V2.2 (roadmap #9): umbral de "transferencia grande" configurable -->
+                <div class="flow-coverage" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.6rem;">
+                    <label for="whale-threshold-input" style="font-size:0.8rem;" data-i18n="wh.umbral">Umbral de transferencia grande:</label>
+                    <input type="number" id="whale-threshold-input" step="10000" min="1000" style="width:110px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; padding:0.2rem 0.4rem;">
+                    <span style="font-size:0.8rem;">XRP</span>
+                    <button id="whale-threshold-save" class="refresh-btn" style="padding:0.25rem 0.7rem; font-size:0.75rem;" data-i18n="wh.guardar">Guardar</button>
+                    <span id="whale-threshold-note" style="font-size:0.75rem; color:#64748b;"></span>
+                </div>
+
+                <!-- Resumen Superior KPIs -->
+                <div class="whale-summary-grid">
+                    <div class="kpi-card glass-effect">
+                        <span class="kpi-label" data-i18n="wh.kpiTransfers">Transferencias Grandes (24h)</span>
+                        <span class="kpi-value" id="whale-kpi-count">0</span>
+                        <span class="kpi-explain" data-i18n="wh.expTransfers">Movimientos ≥ 50.000 XRP en wallets vigiladas</span>
+                    </div>
+                    <div class="kpi-card glass-effect">
+                        <span class="kpi-label" data-i18n="wh.kpiVolumen">Volumen Ballenas (24h)</span>
+                        <span class="kpi-value" id="whale-kpi-volume">0 XRP</span>
+                        <span class="kpi-explain" data-i18n="wh.expVolumen">XRP total movido en esas transferencias</span>
+                    </div>
+                    <div class="kpi-card glass-effect">
+                        <span class="kpi-label" data-i18n="wh.kpiFlujo">Flujo Neto a Exchanges</span>
+                        <span class="kpi-value" id="whale-kpi-flow">0 XRP</span>
+                        <span class="kpi-explain" id="whale-kpi-flow-sub" data-i18n="wh.expFlujo">Positivo = entra a exchanges (oferta de venta)</span>
+                    </div>
+                </div>
+
+                <!-- V2.1: Línea de tiempo del flujo a exchanges (rediseño completo) -->
+                <div class="whale-flow-chart-section glass-effect">
+                    <div class="chart-header">
+                        <h3 data-i18n="wh.titulo">¿Qué han hecho las ballenas? <span class="mini-src">flujo a exchanges en el tiempo</span></h3>
+                        <div class="flow-toggle">
+                            <button class="flow-window-btn active" data-window="24h" data-i18n="wh.24h">Últimas 24h</button>
+                            <button class="flow-window-btn" data-window="7d" data-i18n="wh.7d">Últimos 7 días</button>
+                        </div>
+                    </div>
+
+                    <!-- Veredicto en una frase (lo primero que se lee) -->
+                    <div id="whale-flow-verdict"><!-- Inyectado desde JS --></div>
+
+                    <!-- Entradas / Salidas / Neto / Entre ballenas -->
+                    <div class="flow-mini-kpis" id="whale-flow-kpis"><!-- Inyectado desde JS --></div>
+
+                    <div class="whale-chart-container">
+                        <canvas id="whaleTimelineChart"></canvas>
+                    </div>
+                    <div class="flow-chart-hint" data-i18n="wh.hint">Rojas (arriba) = entra a exchanges · Verdes (abajo) = sale hacia wallets frías · Violetas = entre ballenas (neutro) · Línea = neto acumulado</div>
+
+                    <div id="whale-flow-insight" class="whale-insight-box">
+                        <!-- Inyectado desde JS -->
+                    </div>
+                    <div id="whale-flow-coverage" class="flow-coverage"><!-- Cobertura de datos --></div>
+                </div>
+
+                <!-- V2.2 (roadmap #7): evolución del flujo neto día a día, usa history.json -->
+                <div class="whale-flow-chart-section glass-effect">
+                    <div class="chart-header">
+                        <h3 data-i18n="wh.evolucion">Evolución del flujo neto <span class="mini-src">histórico diario</span></h3>
+                    </div>
+                    <div class="whale-chart-container" style="height:120px;">
+                        <canvas id="whaleFlowSparkline"></canvas>
+                    </div>
+                    <div id="whale-flow-sparkline-note" class="flow-coverage"><!-- Cobertura del histórico --></div>
+                </div>
+
+                <div class="whale-main-grid">
+                    <!-- Feed de Grandes Transferencias -->
+                    <div class="whale-feed-section glass-effect">
+                        <h3 data-i18n="wh.grandes">Grandes Transferencias</h3>
+                        <div id="whale-feed-list" class="whale-list">
+                            <!-- Inyectado desde JS -->
+                        </div>
+                    </div>
+
+                    <!-- Wallets Monitoreadas -->
+                    <div class="monitored-wallets-section glass-effect">
+                        <h3 data-i18n="wh.wallets">Wallets Monitoreadas</h3>
+                        <div id="monitored-wallets-list" class="whale-list">
+                            <!-- Inyectado desde JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vista: Suministro (Supply Distribution + Ripple Escrow, V2.4:
+             el escrow encaja aquí temáticamente — es suministro bloqueado) -->
+        <div id="supply-dist-tab" class="tab-content">
+            <div class="supply-overview-container">
+                <!-- V2.5: suministro genérico para monedas no-XRP (datos de CoinGecko).
+                     Se rellena desde renderSupplyGeneric() en app.js; oculto en XRP. -->
+                <div id="supply-generic" class="supply-section glass-effect" style="display:none;">
+                    <h3><span data-i18n="sup.genTitulo">Suministro</span> <span class="mini-src">CoinGecko</span></h3>
+                    <div id="supply-generic-content"></div>
+                </div>
+                <div class="supply-page-grid" data-xrp-only>
+                <div class="supply-section glass-effect" style="height: 100%;">
+                    <h3 data-i18n="sup.titulo">Supply Distribution</h3>
+                    <div class="supply-summary-row" id="supply-dist-kpis">
+                        <!-- KPI Cards -->
+                    </div>
+                    <div class="supply-visual-container">
+                        <div class="supply-bar-stack" id="supply-bar-stack">
+                            <!-- Segmentos de la barra -->
+                        </div>
+                        <div class="supply-legend" id="supply-legend">
+                            <!-- Leyenda inyectada desde app.js -->
+                        </div>
+                    </div>
+                    <div class="supply-details-grid" id="supply-dist-details">
+                        <!-- Cards de cada segmento -->
+                    </div>
+                    <div class="supply-notes">
+                        <p class="note-text" data-i18n="sup.nota">* Los valores de Exchange, Whale y Free Float son estimaciones basadas en el circulante actual.</p>
+                    </div>
+                    <div class="distribution-insights" id="distribution-insights">
+                        <!-- Inyectado desde JS -->
+                    </div>
+                </div>
+
+                <!-- V2.4: Ripple Escrow (antes card en Mercado) — el div interno
+                     #escrow-timer es el que rellena app.js, no cambia -->
+                <div id="events-escrow" class="supply-section glass-effect">
+                    <h3 data-i18n="card.escrow">Ripple Escrow</h3>
+                    <div class="card-content" id="escrow-timer" style="display: flex; flex-direction: column; gap: 0.5rem; height: 100%; justify-content: space-around;">
+                        <!-- El contenido se inyecta desde app.js -->
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vista: Quema en Vivo (Burn Impact) -->
+        <div id="burn-impact-tab" class="tab-content">
+            <div class="supply-overview-container">
+                <div class="burn-grid-layout">
+                    <!-- Columna Izquierda: Tendencia y Proyecciones -->
+                    <div class="supply-section glass-effect">
+                        <h3>
+                            Burn Trend & Impact
+                            <span class="live-tag"><span class="live-dot"></span>LIVE</span>
+                            <span id="burn-source-badge" class="burn-source-badge src-starting">Conectando a XRPL...</span>
+                        </h3>
+                        <div class="burn-summary-row" id="burn-kpis">
+                            <!-- KPI Cards -->
+                        </div>
+
+                        <!-- Live Burn Monitor (tiempo real) -->
+                        <div class="live-burn-monitor">
+                            <div class="live-burn-header">
+                                <div class="live-burn-title">
+                                    <span class="live-dot"></span>
+                                    <span data-i18n="burn.monitorVivo">Monitor en Vivo</span>
+                                </div>
+                                <span class="live-burn-updated" id="burn-last-updated" data-i18n="burn.esperando">esperando datos...</span>
+                            </div>
+                            <div class="live-burn-grid">
+                                <div class="live-burn-card">
+                                    <span class="live-burn-label" data-i18n="burn.totalQuemado">Total Quemado (Histórico)</span>
+                                    <span class="live-burn-val" id="live-total-burned">--</span>
+                                    <span class="live-burn-sub">+<span id="live-rate-per-sec">--</span> <span data-i18n="burn.xrpSeg">XRP/seg</span></span>
+                                </div>
+                                <div class="live-burn-card highlight">
+                                    <span class="live-burn-label" data-i18n="burn.desdeTab">Desde que abriste el tab</span>
+                                    <span class="live-burn-val" id="live-session-burned">0</span>
+                                    <span class="live-burn-sub" id="live-session-time" data-i18n="burn.enPantalla">0s en pantalla</span>
+                                </div>
+                                <div class="live-burn-card">
+                                    <span class="live-burn-label" data-i18n="burn.ultimaHora">Última Hora (real)</span>
+                                    <span class="live-burn-val" id="live-hour-burn">--</span>
+                                    <span class="live-burn-sub">≈ <span id="live-min-burn">--</span> XRP/min</span>
+                                </div>
+                                <div class="live-burn-card">
+                                    <span class="live-burn-label" data-i18n="burn.ult24">Últimas 24h (real)</span>
+                                    <span class="live-burn-val" id="live-24h-burn">--</span>
+                                    <span class="live-burn-sub" data-i18n="burn.sumaBuckets">Suma de buckets horarios</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="burn-chart-container">
+                            <div class="burn-chart-title">
+                                <span data-i18n="burn.chartTitulo">Burn por hora · últimas 24h</span>
+                                <span class="burn-chart-sub" id="burn-chart-sub" data-i18n="burn.conectando">Conectando al XRPL...</span>
+                            </div>
+                            <canvas id="burnHourlyChart"></canvas>
+                        </div>
+                        <div id="burn-chart-reading"><!-- Lectura práctica inyectada desde app.js --></div>
+                        <div class="burn-projections-container">
+                            <h4 data-i18n="burn.proyImpacto">Proyecciones de Impacto Acumulado</h4>
+                            <div class="projections-grid" id="burn-projections">
+                                <!-- Cards proyecciones -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Columna Derecha: Escenarios y Agotamiento -->
+                    <div class="supply-section glass-effect">
+                        <h3 data-i18n="burn.proyAgotamiento">Proyecciones de Agotamiento</h3>
+
+                        <div class="burn-scenarios-container">
+                            <h4 data-i18n="burn.escenarios">Escenarios de Quema (XRP/día)</h4>
+                            <div class="scenarios-row" id="burn-scenarios">
+                                <!-- Escenarios -->
+                            </div>
+                        </div>
+
+                        <div class="burn-completion-container">
+                            <div class="completion-header">
+                                <h4>Full Supply Burn Projection</h4>
+                                <div class="supply-base-selector">
+                                    <select id="base-selector">
+                                        <option value="max" data-i18n="opt.max">Max Supply</option>
+                                        <option value="total" selected data-i18n="opt.total">Total Remaining</option>
+                                        <option value="circulating" data-i18n="opt.circulating">Circulating</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="completion-main-display">
+                                <div class="duration-highlight">
+                                    <span id="projected-duration-val">---</span>
+                                    <span class="duration-label" data-i18n="burn.paraAgotamiento">para el agotamiento</span>
+                                </div>
+                            </div>
+                            <div id="burn-completion-reading"><!-- Lectura práctica inyectada desde app.js --></div>
+
+                            <div class="completion-comparison-grid" id="completion-comparison">
+                                <!-- Mini cards -->
+                            </div>
+
+                            <div class="completion-reality-check">
+                                <p data-i18n="burn.notaLineal"><strong>Nota:</strong> Proyección matemática lineal basada en el ritmo actual. El burn real es dinámico.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Resumen de Noticias -->
+    <div id="news-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content glass-effect">
+            <div class="modal-header">
+                <h3 id="modal-title" data-i18n="modal.noticia">Detalles de la Noticia</h3>
+                <button id="close-modal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-section">
+                    <h4 data-i18n="modal.resumenEs"><span class="icon">📄</span> Resumen en Español</h4>
+                    <p id="modal-summary-es"></p>
+                </div>
+                <div class="modal-section impact-box">
+                    <h4 data-i18n="modal.impacto"><span class="icon">📈</span> Impacto Proyectado en XRP</h4>
+                    <p id="modal-impact-analysis"></p>
+                </div>
+                <div class="modal-footer">
+                    <span id="modal-sentiment-tag" class="sentiment-tag">NEUTRO</span>
+                    <a id="modal-source-link" href="#" target="_blank" class="source-btn" data-i18n="modal.leerFuente">Leer fuente original ↗</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Detalle de Wallet -->
+    <div id="wallet-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content glass-effect wallet-detail-modal">
+            <div class="modal-header">
+                <div class="wallet-header-info">
+                    <h3 id="wallet-modal-address">rAddress...</h3>
+                    <div class="wallet-badges" id="wallet-modal-badges">
+                        <!-- Inyectado desde JS -->
+                    </div>
+                </div>
+                <button id="close-wallet-modal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Resumen Rápido -->
+                <div class="wallet-stats-grid">
+                    <div class="stat-box">
+                        <span class="stat-label">Total Ops</span>
+                        <span class="stat-value" id="wallet-stat-total">0</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label" data-i18n="wm.entradas">Entradas</span>
+                        <span class="stat-value text-green" id="wallet-stat-in">0</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label" data-i18n="wm.salidas">Salidas</span>
+                        <span class="stat-value text-red" id="wallet-stat-out">0</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label" data-i18n="wm.volumen">Volumen</span>
+                        <span class="stat-value" id="wallet-stat-volume">0 XRP</span>
+                    </div>
+                </div>
+
+                <!-- Gráfico de Historial -->
+                <div class="wallet-chart-container">
+                    <canvas id="walletHistoryChart"></canvas>
+                </div>
+                <div id="wallet-reading"><!-- Lectura práctica inyectada desde app.js --></div>
+
+                <!-- Filtros de Historial -->
+                <div class="history-filters">
+                    <button class="history-filter-btn active" data-filter="all" data-i18n="filtro.todos">Todos</button>
+                    <button class="history-filter-btn" data-filter="IN" data-i18n="filtro.entradas">Entradas</button>
+                    <button class="history-filter-btn" data-filter="OUT" data-i18n="filtro.salidas">Salidas</button>
+                    <button class="history-filter-btn" data-filter="large" data-i18n="filtro.grandes">Grandes (>1M)</button>
+                    <button class="history-filter-btn" data-filter="24h" data-i18n="filtro.24h">Últimas 24h</button>
+                    <button class="history-filter-btn" data-filter="7d" data-i18n="filtro.7d">Últimos 7d</button>
+                </div>
+
+                <!-- Tabla de Historial -->
+                <div class="wallet-history-table-container">
+                    <table class="wallet-history-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="th.fecha">Fecha/Hora</th>
+                                <th data-i18n="th.tipo">Tipo</th>
+                                <th data-i18n="th.cantidad">Cantidad</th>
+                                <th data-i18n="th.dir">Dir.</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wallet-history-body">
+                            <!-- Inyectado desde JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de configuración de Alertas Locales (roadmap #8, v2.2) -->
+    <div id="alerts-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content glass-effect">
+            <div class="modal-header">
+                <h3 data-i18n="al.titulo">Alertas locales</h3>
+                <button id="close-alerts-modal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:0.8rem;color:#94a3b8;margin-bottom:0.8rem;" data-i18n="al.intro">
+                    Notificaciones nativas del navegador (Notification API). Solo funcionan mientras esta pestaña sigue abierta y revisando datos —
+                    no hay servidor de notificaciones push. Se guardan en tu navegador (localStorage), nunca salen de tu máquina.
+                </p>
+                <div id="alerts-permission-status" style="margin-bottom:0.8rem;"></div>
+                <div class="history-filters" style="flex-direction:column; align-items:flex-start; gap:0.5rem;">
+                    <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem;"><input type="checkbox" id="alert-rsi"> <span data-i18n="al.rsi">RSI cruza sobrecompra (&gt;70) / sobreventa (&lt;30)</span></label>
+                    <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem;"><input type="checkbox" id="alert-cross"> <span data-i18n="al.cross">Golden Cross / Death Cross (SMA50 vs SMA200)</span></label>
+                    <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem;"><input type="checkbox" id="alert-levels"> <span data-i18n="al.niveles">Precio toca soporte / resistencia / nivel psicológico</span></label>
+                    <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem;"><input type="checkbox" id="alert-funding"> <span data-i18n="al.funding">Funding rate cambia de signo (Kraken Futures)</span></label>
+                    <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem;">
+                        <input type="checkbox" id="alert-whale"> <span data-i18n="al.whalePre">Flujo neto a exchanges supera</span>
+                        <input type="number" id="alert-whale-threshold" value="500000" step="50000" style="width:100px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; padding:0.2rem 0.4rem;"> <span>XRP (24h)</span>
+                    </label>
+                </div>
+                <button id="alerts-save-btn" class="refresh-btn" style="margin-top:1rem;" data-i18n="al.guardar">Guardar y activar notificaciones</button>
+                <p id="alerts-test-note" style="font-size:0.7rem;color:#64748b;margin-top:0.6rem;"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- V2.3: Modal de cambio de contraseña -->
+    <div id="account-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content glass-effect" style="max-width:400px;">
+            <div class="modal-header">
+                <h3 data-i18n="acc.titulo">Cambiar contraseña</h3>
+                <button id="close-account-modal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="account-form" autocomplete="off">
+                    <label for="acc-current" class="acc-label" data-i18n="acc.actual">Contraseña actual</label>
+                    <input id="acc-current" type="password" autocomplete="current-password" required class="acc-input">
+                    <label for="acc-new" class="acc-label" data-i18n="acc.nueva">Nueva contraseña</label>
+                    <input id="acc-new" type="password" autocomplete="new-password" minlength="8" required class="acc-input">
+                    <label for="acc-new2" class="acc-label" data-i18n="acc.repetir">Repetir nueva contraseña</label>
+                    <input id="acc-new2" type="password" autocomplete="new-password" minlength="8" required class="acc-input">
+                    <div id="account-msg" class="auth-error" style="display:none;"></div>
+                    <button type="submit" id="account-submit" class="refresh-btn" style="margin-top:0.9rem; width:100%;" data-i18n="acc.guardar">Cambiar contraseña</button>
+                </form>
+                <p class="auth-note" data-i18n="acc.nota">Al cambiarla se cerrarán las sesiones abiertas en otros dispositivos. Mínimo 8 caracteres.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script principal de la aplicación -->
+    <!-- V2.3: i18n debe cargar ANTES de app.js (app.js usa window.t) -->
+    <script src="i18n.js?v=5"></script>
+    <script src="app.js?v=24"></script>
+</body>
+</html>
