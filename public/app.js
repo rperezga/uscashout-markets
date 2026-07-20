@@ -287,44 +287,9 @@ async function renderPortfolio() {
     }
 }
 
-function _pfHoldingsMap(pf) {
-    const m = {};
-    (pf.holdings || []).forEach(h => { m[h.id] = h.amount; });
-    return m;
-}
-
-function _pfEditPanel(registry, holdingsMap) {
-    const coins = (registry && registry.length) ? registry : [{ id: 'ripple', symbol: 'XRP', name: 'XRP', iso20022: true }];
-    const inputs = coins.map(c => {
-        const key = c.id === 'ripple' ? 'myXrpAmount' : ('myAmount_' + c.id);
-        const val = (holdingsMap[c.id] != null) ? holdingsMap[c.id] : '';
-        return `
-            <div class="pf-edit-item">
-                <label class="pf-edit-label"><span class="pf-sym">${c.symbol}</span> <span class="pf-name">${c.name}</span></label>
-                <input class="pf-edit-input" type="number" min="0" step="any" inputmode="decimal" placeholder="0" value="${val}" data-key="${key}" />
-            </div>`;
-    }).join('');
-    return `
-        <section class="pf-card glass-effect pf-edit">
-            <h2>${_pick('Editar tenencias', 'Edit holdings')}</h2>
-            <p class="pf-edit-sub">${_pick('Escribe cuánto tienes de cada moneda. Se guarda en tu cuenta al salir del campo.', 'Enter how much you hold of each coin. Saved to your account when you leave the field.')}</p>
-            <div class="pf-edit-grid">${inputs}</div>
-        </section>`;
-}
-
-function _pfWireEdit(container) {
-    container.querySelectorAll('.pf-edit-input').forEach(inp => {
-        // Guardar al TERMINAR el campo (blur/Enter): persistencia limpia por campo y un
-        // solo re-render con precios frescos para las monedas recién añadidas.
-        inp.addEventListener('change', async () => {
-            const key = inp.getAttribute('data-key');
-            const val = String(inp.value || '').trim();
-            try { localStorage.setItem(key, val); } catch (e) { /* no-op */ }
-            await saveUserSetting(key, val);
-            renderPortfolio();
-        });
-    });
-}
+// v2.8.1: el portafolio ya NO tiene panel de edición propio. La ÚNICA fuente de las
+// cantidades es "My Crypto" (pestaña Mercado, por moneda) — así hay una sola verdad y no
+// dos sitios que editar. Esta vista solo LEE y consolida.
 
 function _pfReadingText(pf) {
     const top = pf.holdings[0];
@@ -363,9 +328,8 @@ function _pfDrawDonut(pf) {
 
 function _pfRender(container, pf) {
     const fmtUsd = (v) => _fmtUsd(v, 2);
-    const registry = (window._coinsRegistry && window._coinsRegistry.length) ? window._coinsRegistry : [];
 
-    // Estado vacío: aún no ha metido cantidades.
+    // Estado vacío: aún no ha metido cantidades (se editan en Mercado → My Crypto).
     if (!pf.holdings || pf.holdings.length === 0) {
         container.innerHTML = `
             <div class="pf-hero glass-effect">
@@ -376,11 +340,9 @@ function _pfRender(container, pf) {
             </div>
             <div class="pf-empty glass-effect">
                 <div class="pf-empty-ico">💼</div>
-                <p>${_pick('Aún no has añadido tus monedas. Escribe abajo cuánto tienes de cada una y verás el valor real al instante.', "You haven't added your coins yet. Enter below how much you hold of each and see the real value instantly.")}</p>
+                <p>${_pick('Aún no has añadido cantidades. Ve a <strong>Mercado</strong>, elige cada moneda en el selector de arriba y escribe cuánto tienes en <strong>“My Crypto”</strong>. Aquí verás el total consolidado.', 'No amounts yet. Go to <strong>Market</strong>, pick each coin in the selector at the top and enter how much you hold under <strong>“My Crypto”</strong>. This page shows the consolidated total.')}</p>
             </div>
-            ${_pfEditPanel(registry, {})}
             <div class="chart-reading reading-info"><span class="reading-icon">💡</span><div class="reading-body"><strong>${_pick('Privado y por cuenta', 'Private, per account')}</strong><span>${_pick('Tus cantidades se guardan en tu cuenta, cifradas junto a tu login. Nadie más las ve.', 'Your amounts are saved to your account, alongside your login. No one else sees them.')}</span></div></div>`;
-        _pfWireEdit(container);
         return;
     }
 
@@ -454,16 +416,14 @@ function _pfRender(container, pf) {
             </section>
         </div>
 
-        ${_pfEditPanel(registry, _pfHoldingsMap(pf))}
-
         <div class="chart-reading reading-${changePos ? 'pos' : 'neg'}">
             <span class="reading-icon">${arrow}</span>
             <div class="reading-body"><strong>${_pick('Qué significa', 'What this means')}</strong><span>${_pfReadingText(pf)}</span></div>
         </div>
+        <p class="pf-edit-hint">${_pick('Para cambiar tus cantidades ve a <strong>Mercado</strong>, elige la moneda arriba y edita <strong>“My Crypto”</strong>.', 'To change your amounts go to <strong>Market</strong>, pick the coin at the top and edit <strong>“My Crypto”</strong>.')}</p>
         <p class="pf-disclaimer">${_pick('Solo informativo. Los valores dependen del precio de mercado en tiempo real y cambian constantemente; no es asesoramiento financiero.', 'Informational only. Values depend on the live market price and change constantly; not financial advice.')}</p>`;
 
     _pfDrawDonut(pf);
-    _pfWireEdit(container);
 }
 
 async function loadDashboardData() {
@@ -644,6 +604,9 @@ async function loadDashboardData() {
                         summary.textContent = amt > 0 ? fmtXrp(amt) + ' ' + _coinSym() + ' × ' + fmtUsd(price) + '/' + _coinSym() : (_isXrpActive() ? t('mc.ingresa', 'Ingresa tu cantidad de XRP arriba') : (_isEn() ? `Enter your ${_coinSym()} amount above` : `Ingresa tu cantidad de ${_coinSym()} arriba`));
                     }
                 });
+                // v2.8.1: al salir del campo (blur/Enter) se guarda YA, sin debounce — la fuente
+                // única de las tenencias del portafolio es este campo, así que no se puede perder.
+                input.addEventListener('change', (e) => { saveUserSetting(amountKey, String(e.target.value || '').trim()); });
             }
         }
     } catch (e) { console.error('Error renderizando My Crypto:', e); }
@@ -3788,10 +3751,14 @@ async function saveUserSetting(key, value) {
     } catch (e) { console.error('No se pudo guardar el ajuste en BD:', e); }
 }
 
-let _settingDebounce = null;
+// Bugfix (v2.8.1): debounce POR CLAVE, no un único timer global. Antes, un solo timer
+// hacía que meter la cantidad de una moneda y enseguida la de otra CANCELARA el guardado
+// de la primera (se perdían tenencias — p. ej. HBAR no se guardaba si luego tocabas XLM).
+// Cada clave tiene su propio temporizador, así que ninguna cancela a las demás.
+const _settingDebounce = {};
 function saveUserSettingDebounced(key, value) {
-    clearTimeout(_settingDebounce);
-    _settingDebounce = setTimeout(() => saveUserSetting(key, value), 800);
+    if (_settingDebounce[key]) clearTimeout(_settingDebounce[key]);
+    _settingDebounce[key] = setTimeout(() => { delete _settingDebounce[key]; saveUserSetting(key, value); }, 800);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

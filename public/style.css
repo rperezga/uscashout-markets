@@ -2659,3 +2659,7 @@ body.coin-generic .deriv-page-grid { grid-template-columns: 1fr; grid-template-r
 .pf-empty p { margin: 0 auto; max-width: 460px; line-height: 1.5; }
 
 .pf-disclaimer { font-size: 0.72rem; color: #64748b; text-align: center; margin: 0.2rem 0 0.5rem; }
+
+/* v2.8.1: nota de "edita en Mercado → My Crypto" (el portafolio ya no edita) */
+.pf-edit-hint { font-size: 0.8rem; color: #94a3b8; text-align: center; margin: 0.4rem 0 0.1rem; }
+.pf-edit-hint strong { color: #cbd5e1; font-weight: 600; }
