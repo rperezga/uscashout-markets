@@ -3340,6 +3340,100 @@ app.get('/api/portfolio', requireAuth, async (req, res) => {
     }
 });
 
+// ============================================================
+// Rendimiento del portafolio en el tiempo (v2.8.2)
+// ============================================================
+// GET /api/portfolio/history?range=<días> — el valor total del portafolio día a día.
+// Serie = RECONSTRUCCIÓN (tenencias actuales × precios históricos de cada moneda, una
+// llamada market_chart por moneda cacheada 6h) MEZCLADA con los snapshots REALES ya
+// guardados (que mandan sobre la reconstrucción). Cada visita snapshotea el valor de HOY,
+// así el histórico real se va construyendo. Devuelve además P&L 24h/7d/30d/desde-inicio.
+const _coinHistoryCache = {}; // { id: { at, prices: {YYYY-MM-DD: price} } }
+
+async function fetchCoinDailyHistory(coingeckoId, days) {
+    const now = Date.now();
+    const cached = _coinHistoryCache[coingeckoId];
+    if (cached && (now - cached.at) < 6 * 3600 * 1000) return cached.prices;
+    try {
+        const url = `https://api.coingecko.com/api/v3/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
+        const resp = await coingeckoFetch(url);
+        if (!resp.ok) return cached ? cached.prices : {};
+        const data = await resp.json();
+        const prices = {};
+        (data.prices || []).forEach(([ts, price]) => { prices[new Date(ts).toISOString().slice(0, 10)] = price; });
+        _coinHistoryCache[coingeckoId] = { at: now, prices };
+        return prices;
+    } catch (e) {
+        return cached ? cached.prices : {};
+    }
+}
+
+app.get('/api/portfolio/history', requireAuth, async (req, res) => {
+    try {
+        const range = Math.min(Math.max(parseInt(req.query.range, 10) || 365, 7), 365);
+        const settings = (await dbLayer.getAllSettings(req.user.id)) || {};
+        const held = [];
+        for (const c of COINS) {
+            const key = c.id === 'ripple' ? 'myXrpAmount' : ('myAmount_' + c.id);
+            const amt = parseFloat(settings[key]);
+            if (amt && amt > 0) held.push({ id: c.id, amount: amt });
+        }
+        if (held.length === 0) return res.json({ series: [], pnl: {}, latest: 0, range, empty: true });
+
+        // Precios diarios por moneda (cacheados).
+        const histories = {};
+        for (const h of held) histories[h.id] = await fetchCoinDailyHistory(h.id, range);
+
+        // Días (unión) ordenados; valor por día = Σ cantidad × precio(día), con forward-fill
+        // del último precio conocido si una moneda no tiene dato ese día.
+        const daySet = new Set();
+        for (const h of held) for (const d of Object.keys(histories[h.id])) daySet.add(d);
+        const days = [...daySet].sort();
+        const lastPrice = {};
+        const recon = [];
+        for (const day of days) {
+            let val = 0, any = false;
+            for (const h of held) {
+                if (histories[h.id][day] != null) lastPrice[h.id] = histories[h.id][day];
+                const use = histories[h.id][day] != null ? histories[h.id][day] : lastPrice[h.id];
+                if (use != null) { val += h.amount * use; any = true; }
+            }
+            if (any) recon.push({ date: day, value: Math.round(val * 100) / 100, real: false });
+        }
+
+        // Mezclar snapshots REALES (mandan sobre la reconstrucción de su día).
+        const since = days.length ? days[0] : new Date().toISOString().slice(0, 10);
+        const snaps = await dbLayer.getPortfolioSnapshots(req.user.id, since);
+        const realByDay = {};
+        for (const s of snaps) realByDay[s.date] = s.totalValue;
+        const series = recon.map(pt => (realByDay[pt.date] != null ? { date: pt.date, value: realByDay[pt.date], real: true } : pt));
+
+        // Snapshot de HOY (upsert) — así el histórico real crece con cada visita.
+        const today = new Date().toISOString().slice(0, 10);
+        const latest = series.length ? series[series.length - 1].value : null;
+        if (latest != null) { dbLayer.snapshotPortfolio(req.user.id, today, latest).catch(() => {}); }
+
+        // P&L por fecha (no por índice): valor en o antes de (hoy - N días).
+        const dayISO = (offset) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - offset); return d.toISOString().slice(0, 10); };
+        const valueOnOrBefore = (target) => { let v = null; for (const pt of series) { if (pt.date <= target) v = pt.value; else break; } return v; };
+        const pnlFor = (n) => {
+            const a = valueOnOrBefore(dayISO(n));
+            if (a == null || latest == null || a === 0) return null;
+            return { abs: Math.round((latest - a) * 100) / 100, pct: Math.round((latest - a) / a * 10000) / 100 };
+        };
+        const first = series.length ? series[0].value : null;
+        const pnl = {
+            d1: pnlFor(1), d7: pnlFor(7), d30: pnlFor(30),
+            sinceStart: (first != null && first > 0 && latest != null) ? { abs: Math.round((latest - first) * 100) / 100, pct: Math.round((latest - first) / first * 10000) / 100, from: series[0].date } : null,
+        };
+
+        res.json({ series, pnl, latest, range, firstReal: snaps.length ? snaps[0].date : null });
+    } catch (error) {
+        console.error('Error en /api/portfolio/history:', error);
+        res.status(500).json({ error: 'No se pudo calcular el rendimiento.' });
+    }
+});
+
 // Endpoint GET /api/chart/:days - Obtiene historial dinámico de precios
 // V2.5: acepta ?coin=<coingeckoId> — sin parámetro sigue siendo XRP (compat).
 app.get('/api/chart/:days', requireAuth, async (req, res) => {

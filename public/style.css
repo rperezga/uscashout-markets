@@ -2663,3 +2663,20 @@ body.coin-generic .deriv-page-grid { grid-template-columns: 1fr; grid-template-r
 /* v2.8.1: nota de "edita en Mercado → My Crypto" (el portafolio ya no edita) */
 .pf-edit-hint { font-size: 0.8rem; color: #94a3b8; text-align: center; margin: 0.4rem 0 0.1rem; }
 .pf-edit-hint strong { color: #cbd5e1; font-weight: 600; }
+
+/* v2.8.2: Rendimiento del portafolio en el tiempo */
+.pf-perf { }
+.pf-perf-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
+.pf-perf-head h2 { margin: 0; }
+.pf-perf-toggle { display: inline-flex; gap: 2px; background: rgba(15,23,42,0.6); border: 1px solid var(--glass-border); border-radius: 8px; padding: 2px; }
+.pf-gran { background: transparent; border: none; color: #94a3b8; font-size: 0.8rem; padding: 0.3rem 0.7rem; border-radius: 6px; cursor: pointer; }
+.pf-gran.active { background: var(--accent-color); color: #04121f; font-weight: 700; }
+.pf-pnl-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.8rem; }
+.pf-pnl-chip { flex: 1 1 130px; background: rgba(15,23,42,0.5); border: 1px solid var(--glass-border); border-radius: 10px; padding: 0.5rem 0.7rem; display: flex; flex-direction: column; gap: 0.15rem; }
+.pf-pnl-lbl { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; }
+.pf-pnl-val { font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pf-pnl-val.pos { color: #22c55e; }
+.pf-pnl-val.neg { color: #ef4444; }
+.pf-pnl-val.muted { color: #64748b; }
+.pf-perf-chart { position: relative; height: 240px; }
+.pf-perf-note { font-size: 0.72rem; color: #64748b; margin: 0.6rem 0 0; line-height: 1.4; }

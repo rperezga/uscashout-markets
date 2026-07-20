@@ -326,6 +326,96 @@ function _pfDrawDonut(pf) {
     });
 }
 
+// ---- Rendimiento en el tiempo (v2.8.2): valor del portafolio día/semana/mes + P&L ----
+let _pfPerfInstance = null;
+let _pfPerfSeries = null;
+let _pfPerfPnl = null;
+let _pfPerfGran = 'day';
+
+async function _pfLoadPerformance() {
+    const note = document.getElementById('pf-perf-note');
+    try {
+        const resp = await fetch('/api/portfolio/history?range=365');
+        if (!resp.ok) throw new Error('history ' + resp.status);
+        const data = await resp.json();
+        _pfPerfSeries = Array.isArray(data.series) ? data.series : [];
+        _pfPerfPnl = data.pnl || {};
+        _pfWirePerfToggle();
+        _pfRenderPerformance();
+    } catch (e) {
+        if (note) note.textContent = _pick('No se pudo cargar el rendimiento ahora mismo.', 'Could not load performance right now.');
+    }
+}
+
+function _pfWirePerfToggle() {
+    document.querySelectorAll('#pf-perf-toggle .pf-gran').forEach(btn => {
+        btn.addEventListener('click', () => {
+            _pfPerfGran = btn.getAttribute('data-gran');
+            document.querySelectorAll('#pf-perf-toggle .pf-gran').forEach(b => b.classList.toggle('active', b === btn));
+            _pfRenderPerformance();
+        });
+    });
+}
+
+// Agrega la serie diaria a día/semana/mes (el último valor de cada periodo manda).
+function _pfAggregate(series, gran) {
+    if (gran === 'day') return series.slice(-60);
+    const keyOf = (date) => {
+        if (gran === 'month') return date.slice(0, 7); // YYYY-MM
+        const d = new Date(date + 'T00:00:00Z');
+        const dow = (d.getUTCDay() + 6) % 7; // lunes = 0
+        d.setUTCDate(d.getUTCDate() - dow);
+        return d.toISOString().slice(0, 10); // fecha del lunes de esa semana
+    };
+    const byKey = new Map();
+    for (const pt of series) byKey.set(keyOf(pt.date), pt);
+    const out = [...byKey.values()];
+    return gran === 'month' ? out.slice(-12) : out.slice(-26);
+}
+
+function _pfRenderPerformance() {
+    if (!_pfPerfSeries) return;
+    const agg = _pfAggregate(_pfPerfSeries, _pfPerfGran);
+
+    const row = document.getElementById('pf-pnl-row');
+    if (row) {
+        const chip = (label, p) => {
+            if (!p) return `<div class="pf-pnl-chip"><span class="pf-pnl-lbl">${label}</span><span class="pf-pnl-val muted">—</span></div>`;
+            const pos = p.abs >= 0; const sign = pos ? '+' : '−';
+            return `<div class="pf-pnl-chip"><span class="pf-pnl-lbl">${label}</span><span class="pf-pnl-val ${pos ? 'pos' : 'neg'}">${sign}${_fmtUsd(Math.abs(p.abs), 2)} · ${sign}${Math.abs(p.pct).toFixed(2)}%</span></div>`;
+        };
+        row.innerHTML = chip('24h', _pfPerfPnl.d1) + chip('7d', _pfPerfPnl.d7) + chip('30d', _pfPerfPnl.d30) + chip(_pick('Desde inicio', 'Since start'), _pfPerfPnl.sinceStart);
+    }
+
+    const canvas = document.getElementById('pf-perf-canvas');
+    if (!canvas || !window.Chart) return;
+    if (_pfPerfInstance) { try { _pfPerfInstance.destroy(); } catch (e) { /* no-op */ } _pfPerfInstance = null; }
+    const labels = agg.map(p => p.date);
+    const values = agg.map(p => p.value);
+    const up = values.length >= 2 ? values[values.length - 1] >= values[0] : true;
+    const color = up ? '#22c55e' : '#ef4444';
+    _pfPerfInstance = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: { labels, datasets: [{ data: values, borderColor: color, backgroundColor: color + '22', fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2 }] },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => _fmtUsd(c.parsed.y, 2) } } },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 10 } } },
+                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: (v) => '$' + Intl.NumberFormat('en-US', { notation: 'compact' }).format(v) } }
+            }
+        }
+    });
+
+    const note = document.getElementById('pf-perf-note');
+    if (note) {
+        note.textContent = _pick(
+            'La curva se reconstruye con tus tenencias actuales y precios históricos; desde que registraste tus monedas se guarda tu valor real cada día.',
+            'The curve is reconstructed from your current holdings and historical prices; from when you registered your coins, your real value is saved each day.'
+        );
+    }
+}
+
 function _pfRender(container, pf) {
     const fmtUsd = (v) => _fmtUsd(v, 2);
 
@@ -416,6 +506,20 @@ function _pfRender(container, pf) {
             </section>
         </div>
 
+        <section class="pf-card glass-effect pf-perf">
+            <div class="pf-perf-head">
+                <h2>${_pick('Rendimiento en el tiempo', 'Performance over time')}</h2>
+                <div class="pf-perf-toggle" id="pf-perf-toggle">
+                    <button data-gran="day" class="pf-gran active">${_pick('Día', 'Day')}</button>
+                    <button data-gran="week" class="pf-gran">${_pick('Semana', 'Week')}</button>
+                    <button data-gran="month" class="pf-gran">${_pick('Mes', 'Month')}</button>
+                </div>
+            </div>
+            <div class="pf-pnl-row" id="pf-pnl-row"></div>
+            <div class="pf-perf-chart"><canvas id="pf-perf-canvas" height="220"></canvas></div>
+            <p class="pf-perf-note" id="pf-perf-note"></p>
+        </section>
+
         <div class="chart-reading reading-${changePos ? 'pos' : 'neg'}">
             <span class="reading-icon">${arrow}</span>
             <div class="reading-body"><strong>${_pick('Qué significa', 'What this means')}</strong><span>${_pfReadingText(pf)}</span></div>
@@ -424,6 +528,7 @@ function _pfRender(container, pf) {
         <p class="pf-disclaimer">${_pick('Solo informativo. Los valores dependen del precio de mercado en tiempo real y cambian constantemente; no es asesoramiento financiero.', 'Informational only. Values depend on the live market price and change constantly; not financial advice.')}</p>`;
 
     _pfDrawDonut(pf);
+    _pfLoadPerformance();
 }
 
 async function loadDashboardData() {
