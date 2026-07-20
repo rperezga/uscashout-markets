@@ -455,7 +455,6 @@ function _pfRender(container, pf) {
                 <td class="pf-num">${h.price != null ? _fmtPrice(h.price) : '—'}</td>
                 <td class="pf-num" style="color:${chPos ? '#22c55e' : '#ef4444'}">${chTxt}</td>
                 <td class="pf-num pf-val">${h.value != null ? fmtUsd(h.value) : '—'}</td>
-                <td class="pf-num">${(h.allocationPct || 0).toFixed(1)}%</td>
             </tr>`;
     }).join('');
 
@@ -494,7 +493,6 @@ function _pfRender(container, pf) {
                             <th class="pf-num">${_pick('Precio', 'Price')}</th>
                             <th class="pf-num">24h</th>
                             <th class="pf-num">${_pick('Valor', 'Value')}</th>
-                            <th class="pf-num">%</th>
                         </tr></thead>
                         <tbody>${rowsHtml}</tbody>
                     </table>
