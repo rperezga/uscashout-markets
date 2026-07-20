@@ -477,7 +477,7 @@ function _pfRender(container, pf) {
             <section class="pf-card glass-effect pf-alloc">
                 <h2>${_pick('Asignación', 'Allocation')}</h2>
                 <div class="pf-donut-wrap">
-                    <canvas id="pf-donut" width="150" height="150"></canvas>
+                    <canvas id="pf-donut" width="210" height="210"></canvas>
                     <div class="pf-donut-center"><span class="pf-donut-total">${fmtUsd(pf.totalValue)}</span><span class="pf-donut-sub">${_pick('total', 'total')}</span></div>
                 </div>
                 <div class="pf-legend">${legendHtml}</div>

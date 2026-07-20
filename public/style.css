@@ -2721,3 +2721,37 @@ body.coin-generic .deriv-page-grid { grid-template-columns: 1fr; grid-template-r
 .pf-foot-pos { color: #22c55e; }
 .pf-foot-neg { color: #ef4444; }
 .pf-foot .pf-perf-note { display: block; color: #64748b; font-size: 0.7rem; margin-top: 0.15rem; }
+
+/* ============================================================
+   v2.8.6: Mi Portafolio a PANTALLA COMPLETA — sin huecos a los lados ni abajo
+   ============================================================ */
+.portfolio-container {
+    max-width: min(1720px, 96vw);
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 150px); /* header + nav ≈ 150px → llena el resto del viewport */
+    gap: 0.9rem;
+}
+
+/* La rejilla crece para ocupar todo el alto disponible */
+.pf-grid3 { flex: 1 1 auto; align-items: stretch; }
+.pf-grid3 .pf-card { display: flex; flex-direction: column; min-height: 0; }
+
+/* Asignación: donut más grande, centrado; leyenda anclada al fondo de la tarjeta */
+.pf-grid3 .pf-donut-wrap { width: 210px; height: 210px; margin: auto auto 0.6rem; }
+.pf-grid3 .pf-donut-total { font-size: 1.05rem; }
+.pf-grid3 .pf-alloc .pf-legend { margin-top: 0; }
+
+/* Tenencias: la tabla arriba, con aire (la tarjeta estirada ya no aprieta) */
+.pf-grid3 .pf-holdings .pf-table-wrap { flex: 0 0 auto; }
+.pf-grid3 .pf-holdings .pf-table td { padding: 0.6rem 0.5rem; }
+
+/* Rendimiento: la gráfica crece para llenar toda la tarjeta */
+.pf-grid3 .pf-perf { }
+.pf-grid3 .pf-perf-chart { flex: 1 1 auto; height: auto; min-height: 260px; }
+
+/* En pantallas estrechas se apila y se deja de forzar el alto */
+@media (max-width: 1150px) {
+    .portfolio-container { min-height: 0; }
+    .pf-grid3 .pf-perf-chart { min-height: 220px; }
+}
