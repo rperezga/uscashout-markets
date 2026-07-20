@@ -71,6 +71,12 @@ Verificación: arrancar el servidor y revisar consola + navegador. Hay tests de 
 - **My Crypto por moneda**: XRP conserva `myXrpAmount` (compat); el resto usa `myAmount_<coingeckoId>` (allowlist por patrón `SETTING_KEY_PATTERN` en server.js — no añadir claves arbitrarias fuera del patrón).
 - **Límites honestos de fase 1**: sin correlaciones BTC/ETH/SPY para monedas genéricas (sección oculta), noticias sin enriquecimiento IA, histórico diario (history.json) solo de XRP.
 
+## Mi Portafolio (v2.7.2 — vista consolidada de tenencias)
+
+- **Tab "Mi Portafolio"** (primero en el grupo *Inicio*, `data-tab="portfolio"`): suma el valor real de TODAS las monedas que el usuario posee. Valor total + cambio 24h ponderado por valor, donut de asignación (Chart.js), tabla por moneda (cantidad/precio/24h/valor/%), panel para editar cantidades y estado vacío. `renderPortfolio()` en app.js — su **propio fetch**, independiente de la moneda activa; se dispara al activar el tab y al cargar si es el tab activo.
+- **`GET /api/portfolio`** (`requireAuth`): lee las tenencias de los ajustes del usuario (`myXrpAmount` + `myAmount_<id>`, las MISMAS que "My Crypto"), pide precios de todas en UNA llamada `/simple/price` cacheada 60s (memoria, `_portfolioPriceCache`), y **cae a los precios guardados en `data.json`** si CoinGecko falla — nunca se queda en blanco. Devuelve holdings ordenados por valor, total, cambio 24h ponderado y asignación %. NO añade nodo a `data.json` (se computa al vuelo).
+- El precio total 24h es ponderado por valor: `value24hAgo = value / (1 + cambio%/100)` por moneda, y el total se compara contra la suma — lo correcto para un portafolio, no un promedio simple de %.
+
 ## Producción / endurecimiento (v2.6 — leer antes de tocar frontend o cabeceras)
 
 - **Escapado obligatorio de datos externos**: TODO dato que venga de una API (títulos y

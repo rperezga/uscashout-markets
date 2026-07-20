@@ -23,6 +23,7 @@
         // --- Navegación / header ---
         // V2.4: nav agrupada — el data-i18n va en el span .nav-lbl (no en el botón)
         // para no pisar el icono al reemplazar innerHTML.
+        'nav.portfolio': 'My Portfolio',
         'nav.resumen': 'Overview',
         'nav.mercado': 'Market',
         'nav.noticias': 'News',
@@ -36,6 +37,7 @@
         'nav.grpMercado': 'Market',
         'nav.grpAnalisis': 'Analysis',
         'nav.grpOnchain': 'On-Chain',
+        'pf.cargando': 'Loading your portfolio…',
         'btn.refrescar': '<span class="refresh-icon">🔄</span> Refresh',
         'btn.alertas': '<span class="refresh-icon">🔔</span> Alerts',
         'btn.salir': 'Log out',

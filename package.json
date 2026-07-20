@@ -1,6 +1,6 @@
 {
   "name": "xrp-dashboard",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "description": "Local XRP Analytics Dashboard",
   "main": "server.js",
   "scripts": {

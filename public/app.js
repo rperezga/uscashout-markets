@@ -256,6 +256,216 @@ async function loadHistoryData() {
     }
 }
 
+// ============================================================
+// Mi Portafolio — el valor real de lo que tienes, consolidado
+// ============================================================
+const PF_COLORS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f59e0b', '#ef4444', '#14b8a6', '#ec4899', '#eab308', '#64748b'];
+let _pfDonutInstance = null;
+let _pfLoading = false;
+
+// Cantidad flexible: XRP se lee en miles (0 dec), BTC en fracciones (6 dec).
+function _fmtNumFlex(v) {
+    const n = Number(v) || 0;
+    const d = n >= 1000 ? 0 : (n >= 1 ? 2 : 6);
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: d }).format(n);
+}
+
+async function renderPortfolio() {
+    const container = document.getElementById('portfolio-container');
+    if (!container || _pfLoading) return;
+    _pfLoading = true;
+    try {
+        const resp = await fetch('/api/portfolio');
+        if (resp.status === 401) { showAuthOverlay(); return; }
+        if (!resp.ok) throw new Error('portfolio ' + resp.status);
+        _pfRender(container, await resp.json());
+    } catch (e) {
+        console.error('Error cargando portafolio:', e);
+        container.innerHTML = `<div class="pf-empty glass-effect"><div class="pf-empty-ico">⚠️</div><p>${_pick('No se pudo cargar el portafolio. Reintenta en un momento.', 'Could not load your portfolio. Try again in a moment.')}</p></div>`;
+    } finally {
+        _pfLoading = false;
+    }
+}
+
+function _pfHoldingsMap(pf) {
+    const m = {};
+    (pf.holdings || []).forEach(h => { m[h.id] = h.amount; });
+    return m;
+}
+
+function _pfEditPanel(registry, holdingsMap) {
+    const coins = (registry && registry.length) ? registry : [{ id: 'ripple', symbol: 'XRP', name: 'XRP', iso20022: true }];
+    const inputs = coins.map(c => {
+        const key = c.id === 'ripple' ? 'myXrpAmount' : ('myAmount_' + c.id);
+        const val = (holdingsMap[c.id] != null) ? holdingsMap[c.id] : '';
+        return `
+            <div class="pf-edit-item">
+                <label class="pf-edit-label"><span class="pf-sym">${c.symbol}</span> <span class="pf-name">${c.name}</span></label>
+                <input class="pf-edit-input" type="number" min="0" step="any" inputmode="decimal" placeholder="0" value="${val}" data-key="${key}" />
+            </div>`;
+    }).join('');
+    return `
+        <section class="pf-card glass-effect pf-edit">
+            <h2>${_pick('Editar tenencias', 'Edit holdings')}</h2>
+            <p class="pf-edit-sub">${_pick('Escribe cuánto tienes de cada moneda. Se guarda en tu cuenta al salir del campo.', 'Enter how much you hold of each coin. Saved to your account when you leave the field.')}</p>
+            <div class="pf-edit-grid">${inputs}</div>
+        </section>`;
+}
+
+function _pfWireEdit(container) {
+    container.querySelectorAll('.pf-edit-input').forEach(inp => {
+        // Guardar al TERMINAR el campo (blur/Enter): persistencia limpia por campo y un
+        // solo re-render con precios frescos para las monedas recién añadidas.
+        inp.addEventListener('change', async () => {
+            const key = inp.getAttribute('data-key');
+            const val = String(inp.value || '').trim();
+            try { localStorage.setItem(key, val); } catch (e) { /* no-op */ }
+            await saveUserSetting(key, val);
+            renderPortfolio();
+        });
+    });
+}
+
+function _pfReadingText(pf) {
+    const top = pf.holdings[0];
+    const pos = pf.totalChange24hValue >= 0;
+    const conc = top && top.allocationPct >= 60;
+    if (_isEn()) {
+        const dir = pos ? 'up' : 'down';
+        const c = conc ? ` Your portfolio is concentrated in ${top.symbol} (${top.allocationPct.toFixed(0)}%), so its price drives most of the move.` : '';
+        return `Your holdings are worth ${_fmtUsd(pf.totalValue, 2)} right now — ${dir} ${_fmtUsd(Math.abs(pf.totalChange24hValue), 2)} in the last 24h.${c}`;
+    }
+    const dir = pos ? 'ha subido' : 'ha bajado';
+    const c = conc ? ` Está concentrado en ${top.symbol} (${top.allocationPct.toFixed(0)}%), así que su precio manda casi todo el movimiento.` : '';
+    return `Lo que tienes vale ${_fmtUsd(pf.totalValue, 2)} ahora mismo — ${dir} ${_fmtUsd(Math.abs(pf.totalChange24hValue), 2)} en las últimas 24h.${c}`;
+}
+
+function _pfDrawDonut(pf) {
+    const canvas = document.getElementById('pf-donut');
+    if (!canvas || !window.Chart) return;
+    if (_pfDonutInstance) { try { _pfDonutInstance.destroy(); } catch (e) { /* no-op */ } _pfDonutInstance = null; }
+    const labels = pf.holdings.map(h => h.symbol);
+    const data = pf.holdings.map(h => Math.max(h.value || 0, 0));
+    const colors = pf.holdings.map((h, i) => PF_COLORS[i % PF_COLORS.length]);
+    _pfDonutInstance = new Chart(canvas.getContext('2d'), {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: 'rgba(15,23,42,0.55)', borderWidth: 2 }] },
+        options: {
+            responsive: false,
+            cutout: '68%',
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${_fmtUsd(ctx.parsed, 2)} (${((ctx.parsed / (pf.totalValue || 1)) * 100).toFixed(1)}%)` } }
+            }
+        }
+    });
+}
+
+function _pfRender(container, pf) {
+    const fmtUsd = (v) => _fmtUsd(v, 2);
+    const registry = (window._coinsRegistry && window._coinsRegistry.length) ? window._coinsRegistry : [];
+
+    // Estado vacío: aún no ha metido cantidades.
+    if (!pf.holdings || pf.holdings.length === 0) {
+        container.innerHTML = `
+            <div class="pf-hero glass-effect">
+                <div class="pf-hero-main">
+                    <div class="pf-hero-label">${_pick('Valor total del portafolio', 'Total portfolio value')}</div>
+                    <div class="pf-hero-value">${fmtUsd(0)}</div>
+                </div>
+            </div>
+            <div class="pf-empty glass-effect">
+                <div class="pf-empty-ico">💼</div>
+                <p>${_pick('Aún no has añadido tus monedas. Escribe abajo cuánto tienes de cada una y verás el valor real al instante.', "You haven't added your coins yet. Enter below how much you hold of each and see the real value instantly.")}</p>
+            </div>
+            ${_pfEditPanel(registry, {})}
+            <div class="chart-reading reading-info"><span class="reading-icon">💡</span><div class="reading-body"><strong>${_pick('Privado y por cuenta', 'Private, per account')}</strong><span>${_pick('Tus cantidades se guardan en tu cuenta, cifradas junto a tu login. Nadie más las ve.', 'Your amounts are saved to your account, alongside your login. No one else sees them.')}</span></div></div>`;
+        _pfWireEdit(container);
+        return;
+    }
+
+    const changePos = pf.totalChange24hValue >= 0;
+    const arrow = changePos ? '▲' : '▼';
+    const sign = changePos ? '+' : '−';
+    const updated = pf.updatedAt ? new Date(pf.updatedAt).toLocaleTimeString(_dLoc(), { hour: '2-digit', minute: '2-digit' }) : '';
+    const srcLabel = pf.source === 'stored'
+        ? _pick('precios en caché', 'cached prices')
+        : _pick('precios en vivo', 'live prices');
+
+    const rowsHtml = pf.holdings.map((h, i) => {
+        const color = PF_COLORS[i % PF_COLORS.length];
+        const chPos = (h.change24hPct || 0) >= 0;
+        const chTxt = h.change24hPct == null ? '—' : `${chPos ? '+' : ''}${h.change24hPct.toFixed(2)}%`;
+        return `
+            <tr>
+                <td><span class="pf-dot" style="background:${color}"></span><span class="pf-sym">${h.symbol}</span> <span class="pf-name">${h.name}</span></td>
+                <td class="pf-num">${_fmtNumFlex(h.amount)}</td>
+                <td class="pf-num">${h.price != null ? _fmtPrice(h.price) : '—'}</td>
+                <td class="pf-num" style="color:${chPos ? '#22c55e' : '#ef4444'}">${chTxt}</td>
+                <td class="pf-num pf-val">${h.value != null ? fmtUsd(h.value) : '—'}</td>
+                <td class="pf-num">${(h.allocationPct || 0).toFixed(1)}%</td>
+            </tr>`;
+    }).join('');
+
+    const legendHtml = pf.holdings.map((h, i) => {
+        const color = PF_COLORS[i % PF_COLORS.length];
+        return `<div class="pf-leg-item"><span class="pf-dot" style="background:${color}"></span><span class="pf-sym">${h.symbol}</span><span class="pf-leg-pct">${(h.allocationPct || 0).toFixed(1)}%</span></div>`;
+    }).join('');
+
+    container.innerHTML = `
+        <div class="pf-hero glass-effect">
+            <div class="pf-hero-main">
+                <div class="pf-hero-label">${_pick('Valor total del portafolio', 'Total portfolio value')}</div>
+                <div class="pf-hero-value">${fmtUsd(pf.totalValue)}</div>
+                <div class="pf-hero-change ${changePos ? 'pos' : 'neg'}">${arrow} ${sign}${fmtUsd(Math.abs(pf.totalChange24hValue))} · ${sign}${Math.abs(pf.totalChange24hPct).toFixed(2)}% <span class="pf-hero-24">(24h)</span></div>
+            </div>
+            <div class="pf-hero-meta">
+                <span>${pf.count} ${pf.count === 1 ? _pick('moneda', 'coin') : _pick('monedas', 'coins')}</span>
+                <span class="pf-meta-dot">·</span><span>${srcLabel}</span>
+                ${updated ? `<span class="pf-meta-dot">·</span><span>${_pick('actualizado', 'updated')} ${updated}</span>` : ''}
+            </div>
+        </div>
+
+        <div class="pf-grid">
+            <section class="pf-card glass-effect pf-alloc">
+                <h2>${_pick('Asignación', 'Allocation')}</h2>
+                <div class="pf-donut-wrap">
+                    <canvas id="pf-donut" width="220" height="220"></canvas>
+                    <div class="pf-donut-center"><span class="pf-donut-total">${fmtUsd(pf.totalValue)}</span><span class="pf-donut-sub">${_pick('total', 'total')}</span></div>
+                </div>
+                <div class="pf-legend">${legendHtml}</div>
+            </section>
+
+            <section class="pf-card glass-effect pf-holdings">
+                <h2>${_pick('Tenencias', 'Holdings')}</h2>
+                <div class="pf-table-wrap">
+                    <table class="pf-table">
+                        <thead><tr>
+                            <th>${_pick('Moneda', 'Coin')}</th>
+                            <th class="pf-num">${_pick('Cantidad', 'Amount')}</th>
+                            <th class="pf-num">${_pick('Precio', 'Price')}</th>
+                            <th class="pf-num">24h</th>
+                            <th class="pf-num">${_pick('Valor', 'Value')}</th>
+                            <th class="pf-num">%</th>
+                        </tr></thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        ${_pfEditPanel(registry, _pfHoldingsMap(pf))}
+
+        <div class="chart-reading reading-${changePos ? 'pos' : 'neg'}">
+            <span class="reading-icon">${arrow}</span>
+            <div class="reading-body"><strong>${_pick('Qué significa', 'What this means')}</strong><span>${_pfReadingText(pf)}</span></div>
+        </div>
+        <p class="pf-disclaimer">${_pick('Solo informativo. Los valores dependen del precio de mercado en tiempo real y cambian constantemente; no es asesoramiento financiero.', 'Informational only. Values depend on the live market price and change constantly; not financial advice.')}</p>`;
+
+    _pfDrawDonut(pf);
+    _pfWireEdit(container);
+}
+
 async function loadDashboardData() {
     let data;
     try {
@@ -276,6 +486,9 @@ async function loadDashboardData() {
     }
     hideAuthOverlay();
     await loadHistoryData();
+
+    // Mi Portafolio: si es el tab activo al cargar, píntalo (su fetch es independiente).
+    try { if (document.getElementById('portfolio-tab')?.classList.contains('active')) renderPortfolio(); } catch (e) { /* no-op */ }
 
     if (!data || typeof data !== 'object') {
         console.warn("data.json está vacío o corrompido, esperando primer refresh...");
@@ -1416,6 +1629,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.classList.add('active');
         target.classList.add('active');
         btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+
+        // Mi Portafolio: refresca al entrar (su propio fetch, independiente de la moneda activa).
+        if (tabId === 'portfolio') { try { renderPortfolio(); } catch (e) { /* no-op */ } }
 
         if (persist) {
             try { localStorage.setItem('xrpActiveTab', tabId); } catch (e) { /* no-op */ }

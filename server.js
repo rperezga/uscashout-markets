@@ -3255,6 +3255,102 @@ app.get('/api/data', requireAuth, (req, res) => {
     }
 });
 
+// ============================================================
+// Mi Portafolio — el valor real de lo que el usuario tiene
+// ============================================================
+// Precia TODAS las monedas que el usuario posee en UNA sola llamada
+// /simple/price (la más ligera de CoinGecko), cacheada 60s en memoria: precios
+// simultáneos y consistentes (no XRP de hace 5 min y BTC de hace 30). Si
+// CoinGecko falla (rate-limit/timeout), cae a los precios ya guardados en
+// data.json por los ciclos — el portafolio NUNCA se queda en blanco.
+let _portfolioPriceCache = { at: 0, ids: '', data: null };
+
+app.get('/api/portfolio', requireAuth, async (req, res) => {
+    try {
+        const settings = dbLayer.getAllSettings(req.user.id) || {};
+        // Tenencias desde los ajustes por usuario — la MISMA clave que "My Crypto"
+        // (XRP: myXrpAmount por compat; el resto: myAmount_<coingeckoId>).
+        const held = [];
+        for (const c of COINS) {
+            const key = c.id === 'ripple' ? 'myXrpAmount' : ('myAmount_' + c.id);
+            const amt = parseFloat(settings[key]);
+            if (amt && amt > 0) held.push({ id: c.id, symbol: c.symbol, name: c.name, iso20022: !!c.iso20022, amount: amt });
+        }
+
+        if (held.length === 0) {
+            return res.json({ holdings: [], totalValue: 0, totalChange24hPct: 0, totalChange24hValue: 0, count: 0, missing: 0, source: 'empty', updatedAt: new Date().toISOString() });
+        }
+
+        const ids = held.map(h => h.id).sort().join(',');
+        const now = Date.now();
+        let priceMap = null; // { <id>: { usd, usd_24h_change } }
+        let source = 'live';
+
+        if (_portfolioPriceCache.data && _portfolioPriceCache.ids === ids && (now - _portfolioPriceCache.at) < 60000) {
+            priceMap = _portfolioPriceCache.data;
+            source = 'cached';
+        } else {
+            try {
+                const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true`;
+                const resp = await coingeckoFetch(url);
+                if (resp.ok) {
+                    priceMap = await resp.json();
+                    _portfolioPriceCache = { at: now, ids, data: priceMap };
+                } else {
+                    source = 'stored';
+                }
+            } catch (e) {
+                source = 'stored';
+            }
+        }
+
+        // Fallback: precios ya guardados en data.json (si CoinGecko no respondió,
+        // o para una moneda concreta que no vino en la respuesta).
+        let stored = {};
+        try { stored = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) || {}; } catch (e) { stored = {}; }
+        const storedPriceOf = (id) => {
+            if (id === 'ripple') return { price: stored.marketData?.price ?? null, change: stored.marketData?.priceChange24h ?? null };
+            const node = stored.coins && stored.coins[id] && stored.coins[id].marketData;
+            return { price: node?.price ?? null, change: node?.priceChange24h ?? null };
+        };
+
+        const rows = [];
+        let missing = 0;
+        for (const h of held) {
+            let price = null, change = null, priceSource = source;
+            if (priceMap && priceMap[h.id] && typeof priceMap[h.id].usd === 'number') {
+                price = priceMap[h.id].usd;
+                change = (typeof priceMap[h.id].usd_24h_change === 'number') ? priceMap[h.id].usd_24h_change : null;
+            } else {
+                const s = storedPriceOf(h.id);
+                price = s.price; change = s.change; priceSource = 'stored';
+            }
+            if (price == null) missing++;
+            const value = (price != null) ? h.amount * price : null;
+            rows.push({ id: h.id, symbol: h.symbol, name: h.name, iso20022: h.iso20022, amount: h.amount, price, change24hPct: change, value, priceSource });
+        }
+
+        const totalValue = rows.reduce((s, r) => s + (r.value || 0), 0);
+        // Cambio 24h del portafolio: ponderado por valor (lo correcto). El valor de
+        // hace 24h por moneda es value / (1 + cambio%/100); el total se compara contra eso.
+        let value24hAgo = 0;
+        for (const r of rows) {
+            if (r.value != null && r.change24hPct != null) value24hAgo += r.value / (1 + (r.change24hPct / 100));
+            else if (r.value != null) value24hAgo += r.value; // sin cambio conocido: neutro
+        }
+        const totalChange24hValue = totalValue - value24hAgo;
+        const totalChange24hPct = value24hAgo > 0 ? (totalChange24hValue / value24hAgo) * 100 : 0;
+
+        for (const r of rows) r.allocationPct = (totalValue > 0 && r.value != null) ? (r.value / totalValue) * 100 : 0;
+        rows.sort((a, b) => (b.value || 0) - (a.value || 0));
+
+        res.json({ holdings: rows, totalValue, totalChange24hPct, totalChange24hValue, count: rows.length, missing, source, updatedAt: new Date().toISOString() });
+    } catch (error) {
+        console.error('Error en /api/portfolio:', error);
+        res.status(500).json({ error: 'No se pudo calcular el portafolio.' });
+    }
+});
+
 // Endpoint GET /api/chart/:days - Obtiene historial dinámico de precios
 // V2.5: acepta ?coin=<coingeckoId> — sin parámetro sigue siendo XRP (compat).
 app.get('/api/chart/:days', requireAuth, async (req, res) => {
