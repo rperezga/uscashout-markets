@@ -1,10 +1,10 @@
-# XRP Analytics Dashboard 2.0
+# USCashout Markets — Panel cripto multi-moneda (v2.7)
 
-Dashboard local de análisis para XRP: **resumen ejecutivo en lenguaje llano**, mercado, derivados, ecosistema (RLUSD/dominancias), on-chain, ballenas, distribución de suministro y quema en tiempo real. Todo corre en tu máquina con un servidor Node/Express que agrega APIs públicas y persiste el estado en `data.json`.
+Dashboard de análisis cripto **multi-moneda** con **XRP como moneda principal**: resumen ejecutivo en lenguaje llano, mercado, derivados, técnico, on-chain, ballenas, suministro y quema en tiempo real. Node/Express **cero-build** (sin framework frontend, sin bundler), estado en `data.json`, usuarios en SQLite nativo, **bilingüe ES/EN**. En producción en [uscashout.com](https://uscashout.com).
 
-> **Novedades v2.0** (2026-07-03): tab **Resumen** (la vista de 10 segundos, con veredicto por reglas y frescura de datos), tarjetas de **Derivados** (funding/OI reales de Kraken Futures) y **Ecosistema** (RLUSD + dominancias), noticias XRP-first, escritura serializada de `data.json` (elimina valores contradictorios), saneado del Whale Tracker (unidades) y precio siempre visible en el header. Detalle completo en [`docs/CHANGELOG-V2.md`](docs/CHANGELOG-V2.md); plan del próximo mes en [`docs/ROADMAP-V2.md`](docs/ROADMAP-V2.md).
+> **Qué trae cada versión** — v2.0: tab Resumen (veredicto por reglas), derivados de Kraken Futures, escritura serializada de `data.json` · v2.3: **autenticación** (scrypt + sesiones HttpOnly, SQLite `node:sqlite`), ajustes por usuario · v2.4: **bilingüe completo** ES/EN (motor propio `i18n.js`, campos duales del servidor) · v2.5: **multi-moneda** — 9 monedas (ISO 20022: XRP, XLM, XDC, ALGO, HBAR, IOTA, QNT + BTC y ETH) con ciclo de refresco rotatorio y degradación elegante por fuente · v2.6: endurecimiento (XSS cerrado con `_esc()`/`_safeUrl()`, CSP propia, HSTS, trust proxy, timeouts en todo fetch, cierre limpio) · v2.7: Chart.js **self-hosted** (CSP `script-src 'self'`), bind loopback por defecto, marca **USCashout Markets**. Detalle en [`docs/CHANGELOG-V2.md`](docs/CHANGELOG-V2.md).
 
-> ⚠️ **Propósito educativo.** Ninguna métrica, score o lectura de este dashboard constituye asesoramiento financiero.
+> ⚠️ **Propósito educativo.** Ninguna métrica, score o lectura constituye asesoramiento financiero.
 
 ## Inicio rápido
 
@@ -14,75 +14,77 @@ npm start
 # Abrir http://localhost:3000
 ```
 
-Requisitos: Node.js 18+ (usa `fetch` nativo).
+Requisitos: Node.js 18+ (con Node 22, SQLite nativo vía `node:sqlite`; sin él, fallback JSON automático).
 
-Configura tus claves en `.env` (copia `.env.example`). Sin claves el dashboard funciona igual: el análisis de noticias usa un fallback heurístico local y las noticias vienen de RSS.
+> ★ El **primer usuario registrado se convierte en owner**. En un despliegue nuevo, regístrate tú antes de compartir la URL.
+
+Claves en `.env` (copia `.env.example`; parser propio, sin dotenv). Sin claves todo funciona igual con fallbacks:
 
 | Variable | Para qué | Si falta |
 |---|---|---|
 | `OPENAI_API_KEY` | Resumen e impacto de noticias con gpt-4o-mini | Análisis heurístico local |
 | `CRYPTOPANIC_TOKEN` | Feed de noticias CryptoPanic | Fallback RSS (Cointelegraph) |
+| `NODE_ENV=production` | Cookie `Secure` + HSTS (detrás de HTTPS) | Modo local http |
+| `PORT` / `HOST` | Puerto y bind (default `3000` / `127.0.0.1`) | Defaults |
 
-## Pestañas
+## Pestañas (9, en nav agrupada)
 
-| Pestaña | Contenido |
-|---|---|
-| **Resumen** *(v2.0, por defecto)* | Precio + sparkline 30d, chips (score, F&G, escrow, rango 52s), veredicto y señales en lenguaje llano (`dailyBrief`, reglas sin IA), niveles a vigilar, mini derivados/ecosistema y frescura de cada fuente de datos |
-| **Mercado** | Precio, market cap, volumen, gráfica histórica (1D/7D/1M/1Y) con lectura práctica, datos on-chain (TPS, ledger, cuentas activas), Buy/Sell pressure (Binance) con diferencial neto, Fear & Greed con lectura contraria, proyecciones, ciclo de Ripple Escrow con lectura de dilución, noticias XRP-first analizadas con IA, calculadora "My Crypto", **Derivados** (funding/OI, Kraken Futures) y **Ecosistema XRP** (RLUSD, dominancias) |
-| **Análisis** | Score compuesto educativo (0-100) con lectura de factores, insights automáticos, RSI 14, SMA 20/50/200, MACD, Bollinger, volatilidad, max drawdown, Sharpe, VaR 95%, retornos por periodo, rango 52 semanas, correlación con BTC, liquidez |
-| **Whale Tracker** | Grandes transferencias (≥50k XRP), wallets monitoreadas, flujo neto a exchanges con semántica direccional (entra = oferta de venta, sale = acumulación), perfil acumulación/distribución por wallet |
-| **Supply Distribution** | Circulante vs escrow vs quemado con leyenda, estimaciones de exchanges/whales/free float (marcadas), lectura de dilución mensual real del escrow |
-| **Burn Impact** | Quema de XRP en tiempo real (WebSocket XRPL con fallback REST), gráfica horaria que distingue datos reales (rojo) de estimación inicial (gris), proyecciones de agotamiento con conclusión honesta |
+| Grupo | Pestañas | Contenido |
+|---|---|---|
+| **Inicio** | Resumen | La vista de 10 segundos: precio + sparkline, chips, veredicto y señales por reglas (`dailyBrief`), niveles a vigilar, frescura de cada fuente |
+| **Mercado** | Mercado · Noticias · Derivados | Precio/mcap/volumen, gráfica 1D-1Y con lectura práctica, presión spot (Binance), Fear & Greed, escrow de Ripple, calculadora "My Crypto"; noticias analizadas con IA; funding/OI de Kraken Futures |
+| **Análisis** | Análisis · Técnico | Score compuesto educativo con factores, insights; RSI, SMA 20/50/200, MACD, Bollinger, volatilidad, drawdown, Sharpe, VaR 95%, correlaciones |
+| **On-Chain** *(XRP)* | Ballenas · Suministro · Quema | Transferencias ≥50k XRP con semántica direccional, wallets monitoreadas; circulante vs escrow vs quemado; quema en tiempo real (WebSocket XRPL) con proyecciones honestas |
 
-La guía de **cómo leer cada gráfica** está en [`docs/GUIA-TABS.md`](docs/GUIA-TABS.md).
+Con una moneda no-XRP seleccionada, las secciones exclusivas del XRPL (ballenas, quema, escrow, RLUSD) se ocultan y el resto se adapta (`data-xrp-only`). La guía de lectura completa está en [`docs/GUIA-TABS.md`](docs/GUIA-TABS.md).
 
 ## Arquitectura
 
 ```
-server.js            Backend Express: fetchers, cálculos y API (ciclo cada 5 min)
+server.js            Backend Express: fetchers, cálculos, endpoints, ciclos XRP + multi-coin
+lib/calc.js          Funciones PURAS de cálculo (RSI, MACD, VaR...) — testeadas (npm test)
+lib/db.js            Persistencia usuarios/sesiones/ajustes: SQLite nativo con fallback JSON
+lib/auth.js          Auth: scrypt, sesiones HttpOnly, rate-limit, requireAuth
 xrplBurnWatcher.js   Watcher WebSocket/REST de quema en XRPL (~30 s por muestra)
-data.json            Almacenamiento local autogenerado (en .gitignore)
-.env                 Claves privadas (en .gitignore) — ver .env.example
+data.json            Estado del dashboard, autogenerado (en .gitignore)
 public/
-  index.html         UI (pestañas, modales y layout)
-  app.js             Renderizado, gráficas Chart.js y lecturas prácticas
+  index.html         UI (9 tabs, overlay de auth, selector de monedas)
+  app.js             Renderizado, gráficas y lecturas prácticas (bilingüe)
+  i18n.js            Motor ES/EN: español es la fuente; diccionario solo con overrides EN
   style.css          Tema dark glassmorphism
-docs/
-  GUIA-TABS.md       Qué muestra cada tab y cómo leer cada gráfica
-  AUDITORIA.md       Auditoría: bugs encontrados y corregidos
-  ROADMAP.md         Mejoras futuras propuestas
-CLAUDE.md            Guía para trabajar en este código con Claude
+  vendor/            Chart.js 4.4.7 self-hosted (CSP sin CDNs)
+docs/                GUIA-TABS · AUDITORIA · CHANGELOG-V2 · ROADMAP
+CLAUDE.md            Guía para trabajar en este código con un asistente IA
 ```
 
-**Flujo de datos:** APIs públicas → funciones `fetch*()`/`calculate*()` en `server.js` → escritura atómica en `data.json` → el frontend consume `GET /api/data` y renderiza. El watcher de burn escribe además `burnImpact.realtime` con cada muestra.
+**Flujo de datos:** APIs públicas → `fetch*()`/`calculate*()` en `server.js` → **toda escritura pasa por `withDataFile()`** (cola serializada + escritura atómica) → el frontend consume `GET /api/data`. Ciclo XRP cada 5 min; ciclo multi-coin desfasado ~2,5 min (moneda activa + una de fondo rotando). El burn watcher escribe `burnImpact.realtime` cada ~30 s.
 
 ## Fuentes de datos
 
-- **CoinGecko** — precio, market cap, histórico de precios (XRP y BTC para correlación), **global/dominancias y RLUSD** *(v2.0)*
-- **XRPScan** — ledger, cuentas y transacciones de wallets, lista well-known verificada *(ojo: `/network/metrics` y `/metrics` están muertos — 404)*
-- **Binance (data-api pública)** — klines XRPUSDT para presión compradora/vendedora *(spot; sus futuros están geobloqueados en EE. UU.)*
-- **Kraken Futures** *(v2.0)* — funding rate y open interest del perpetuo XRP (accesible desde EE. UU.)
-- **Alternative.me** — índice Fear & Greed
-- **CryptoPanic + Cointelegraph RSS (fallback)** — noticias (XRP primero; lo macro se etiqueta)
-- **OpenAI (gpt-4o-mini, opcional)** — resumen e impacto de noticias en español
+- **CoinGecko** — precio, mcap, histórico, dominancias y RLUSD; también las 8 monedas no-XRP
+- **XRPScan** — ledger, cuentas, transacciones de wallets, lista well-known verificada
+- **Binance (data-api pública)** — klines spot para presión compradora/vendedora
+- **Kraken Futures** — funding rate y open interest de perpetuos (accesible desde EE. UU.)
+- **Alternative.me** — índice Fear & Greed · **CryptoPanic/RSS** — noticias · **OpenAI** *(opcional)* — resumen IA
 - **XRPL (xrplcluster.com)** — `total_coins` en tiempo real para el burn watcher
 
-## API local
+## API local (toda tras `requireAuth`, salvo `/api/auth/*` y `/health`)
 
-- `GET /api/data` — devuelve todo el `data.json`
-- `GET /api/chart/:days` — histórico de precios (proxy CoinGecko); ⚠️ sobrescribe `chartData`
-- `GET /api/wallet-history/:address` — historial de una wallet (caché 10 min)
-- `POST /api/refresh` — refresco manual completo (cooldown 30 s)
+- `POST /api/auth/{register,login,logout,change-password}` · `GET /api/auth/me`
+- `GET /api/data` — el estado completo · `GET /api/settings` / `POST /api/settings` — ajustes por usuario
+- `GET /api/coins` — registro de monedas · `POST /api/coins/activate` — cambia la moneda activa
+- `GET /api/chart/:days?coin=<id>` — histórico (sin parámetro = XRP)
+- `GET /api/wallet-history/:address` · `POST /api/refresh` (cooldown 30 s) · `GET /health` (liveness, sin auth)
 
 ## Honestidad de datos
 
-La UI distingue tres calidades de dato:
+La UI distingue tres calidades: **Real** (API/XRPL directo) · **Estimado** (badge `≈ estimado` — derivado con fórmulas) · **Demo** (badge `DEMO` — sembrado cuando la API no respondió, solo para ilustrar el formato). Todo lo que no es real está marcado, siempre.
 
-- **Real** — de una API o del XRPL directamente.
-- **Estimado** (badge amarillo `≈ estimado` / `Estimated`) — derivado con fórmulas: cuentas activas desde TPS, split exchanges/whales/free float del supply.
-- **Demo** (badge `DEMO` + aviso naranja) — datos sembrados cuando la API no respondió, solo para ilustrar el formato.
+## Producción
+
+Con `NODE_ENV=production`: cookie de sesión `Secure`, HSTS, `trust proxy` (para el rate-limit real detrás de un túnel/proxy). CSP propia sin dependencias (`script-src 'self'` — Chart.js va self-hosted). El servidor escucha **solo en loopback** por defecto; exponlo con un reverse proxy o túnel HTTPS. `SIGTERM` espera la escritura pendiente de `data.json` antes de salir.
 
 ## Avisos
 
-- Las claves ya **no** están hardcodeadas; viven en `.env`. La clave de OpenAI que estuvo expuesta en `server.js` debe **rotarse** (ver `docs/AUDITORIA.md`).
 - Señales, scores y proyecciones son **educativas**, no asesoramiento financiero.
+- Historia de bugs y auditorías: [`docs/AUDITORIA.md`](docs/AUDITORIA.md).

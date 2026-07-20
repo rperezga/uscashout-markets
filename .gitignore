@@ -13,6 +13,9 @@ dashboard.db
 dashboard-db.json
 docs/test-output.txt
 
+# Scripts de prueba desechables (dev local, no van al repo)
+scratch/
+
 # Sistema
 .DS_Store
 Thumbs.db
