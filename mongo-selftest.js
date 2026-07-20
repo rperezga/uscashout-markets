@@ -74,9 +74,11 @@ const state = require('./lib/state');
     const hdoc = await raw.collection('dashboard_history').findOne({ _id: 'history' });
     check('history persiste a Mongo', !!hdoc && Array.isArray(hdoc.data) && hdoc.data.length === 1);
 
-    // Limpieza: borra la BD de prueba entera.
-    await raw.dropDatabase();
-    console.log('BD de prueba borrada (dropDatabase).');
+    // Limpieza: vacía las colecciones de prueba (solo requiere readWrite, no dbAdmin).
+    for (const c of ['users', 'sessions', 'settings', 'counters', 'dashboard_state', 'dashboard_history']) {
+        try { await raw.collection(c).deleteMany({}); } catch (e) {}
+    }
+    console.log('Colecciones de prueba vaciadas.');
     await mongo.close();
 
     console.log(`\nRESULTADO: ${ok} PASS, ${fail} FAIL`);
