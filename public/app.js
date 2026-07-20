@@ -465,24 +465,20 @@ function _pfRender(container, pf) {
     }).join('');
 
     container.innerHTML = `
-        <div class="pf-hero glass-effect">
+        <div class="pf-hero glass-effect pf-hero-row">
             <div class="pf-hero-main">
                 <div class="pf-hero-label">${_pick('Valor total del portafolio', 'Total portfolio value')}</div>
                 <div class="pf-hero-value">${fmtUsd(pf.totalValue)}</div>
                 <div class="pf-hero-change ${changePos ? 'pos' : 'neg'}">${arrow} ${sign}${fmtUsd(Math.abs(pf.totalChange24hValue))} · ${sign}${Math.abs(pf.totalChange24hPct).toFixed(2)}% <span class="pf-hero-24">(24h)</span></div>
             </div>
-            <div class="pf-hero-meta">
-                <span>${pf.count} ${pf.count === 1 ? _pick('moneda', 'coin') : _pick('monedas', 'coins')}</span>
-                <span class="pf-meta-dot">·</span><span>${srcLabel}</span>
-                ${updated ? `<span class="pf-meta-dot">·</span><span>${_pick('actualizado', 'updated')} ${updated}</span>` : ''}
-            </div>
+            <div class="pf-pnl-row" id="pf-pnl-row"></div>
         </div>
 
-        <div class="pf-grid">
+        <div class="pf-grid3">
             <section class="pf-card glass-effect pf-alloc">
                 <h2>${_pick('Asignación', 'Allocation')}</h2>
                 <div class="pf-donut-wrap">
-                    <canvas id="pf-donut" width="220" height="220"></canvas>
+                    <canvas id="pf-donut" width="150" height="150"></canvas>
                     <div class="pf-donut-center"><span class="pf-donut-total">${fmtUsd(pf.totalValue)}</span><span class="pf-donut-sub">${_pick('total', 'total')}</span></div>
                 </div>
                 <div class="pf-legend">${legendHtml}</div>
@@ -504,28 +500,25 @@ function _pfRender(container, pf) {
                     </table>
                 </div>
             </section>
-        </div>
 
-        <section class="pf-card glass-effect pf-perf">
-            <div class="pf-perf-head">
-                <h2>${_pick('Rendimiento en el tiempo', 'Performance over time')}</h2>
-                <div class="pf-perf-toggle" id="pf-perf-toggle">
-                    <button data-gran="day" class="pf-gran active">${_pick('Día', 'Day')}</button>
-                    <button data-gran="week" class="pf-gran">${_pick('Semana', 'Week')}</button>
-                    <button data-gran="month" class="pf-gran">${_pick('Mes', 'Month')}</button>
+            <section class="pf-card glass-effect pf-perf">
+                <div class="pf-perf-head">
+                    <h2>${_pick('Rendimiento', 'Performance')}</h2>
+                    <div class="pf-perf-toggle" id="pf-perf-toggle">
+                        <button data-gran="day" class="pf-gran active">${_pick('Día', 'Day')}</button>
+                        <button data-gran="week" class="pf-gran">${_pick('Semana', 'Week')}</button>
+                        <button data-gran="month" class="pf-gran">${_pick('Mes', 'Month')}</button>
+                    </div>
                 </div>
-            </div>
-            <div class="pf-pnl-row" id="pf-pnl-row"></div>
-            <div class="pf-perf-chart"><canvas id="pf-perf-canvas" height="220"></canvas></div>
-            <p class="pf-perf-note" id="pf-perf-note"></p>
-        </section>
-
-        <div class="chart-reading reading-${changePos ? 'pos' : 'neg'}">
-            <span class="reading-icon">${arrow}</span>
-            <div class="reading-body"><strong>${_pick('Qué significa', 'What this means')}</strong><span>${_pfReadingText(pf)}</span></div>
+                <div class="pf-perf-chart"><canvas id="pf-perf-canvas"></canvas></div>
+            </section>
         </div>
-        <p class="pf-edit-hint">${_pick('Para cambiar tus cantidades ve a <strong>Mercado</strong>, elige la moneda arriba y edita <strong>“My Crypto”</strong>.', 'To change your amounts go to <strong>Market</strong>, pick the coin at the top and edit <strong>“My Crypto”</strong>.')}</p>
-        <p class="pf-disclaimer">${_pick('Solo informativo. Los valores dependen del precio de mercado en tiempo real y cambian constantemente; no es asesoramiento financiero.', 'Informational only. Values depend on the live market price and change constantly; not financial advice.')}</p>`;
+
+        <p class="pf-foot">
+            <span class="${changePos ? 'pf-foot-pos' : 'pf-foot-neg'}">${arrow}</span> ${_pfReadingText(pf)}
+            <span class="pf-foot-sep">·</span> ${_pick('Para editar cantidades: <strong>Mercado → “My Crypto”</strong>.', 'To edit amounts: <strong>Market → “My Crypto”</strong>.')}
+            <span class="pf-perf-note" id="pf-perf-note"></span>
+        </p>`;
 
     _pfDrawDonut(pf);
     _pfLoadPerformance();

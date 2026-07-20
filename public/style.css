@@ -2680,3 +2680,44 @@ body.coin-generic .deriv-page-grid { grid-template-columns: 1fr; grid-template-r
 .pf-pnl-val.muted { color: #64748b; }
 .pf-perf-chart { position: relative; height: 240px; }
 .pf-perf-note { font-size: 0.72rem; color: #64748b; margin: 0.6rem 0 0; line-height: 1.4; }
+
+/* ============================================================
+   v2.8.4: Mi Portafolio — layout COMPACTO (cabe sin scroll en un portátil)
+   ============================================================ */
+.portfolio-container { gap: 0.8rem; max-width: 1280px; }
+
+/* Cabecera: valor a la izquierda, chips de P&L a la derecha */
+.pf-hero-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding: 0.85rem 1.3rem; }
+.pf-hero-row .pf-hero-value { font-size: 2rem; }
+.pf-hero-row .pf-hero-change { margin-top: 0.25rem; font-size: 0.95rem; }
+.pf-hero-row .pf-pnl-row { margin: 0; gap: 0.4rem; justify-content: flex-end; }
+.pf-hero-row .pf-pnl-chip { flex: 0 0 auto; min-width: 116px; padding: 0.4rem 0.65rem; }
+
+/* Rejilla de 3 columnas: Asignación · Tenencias · Rendimiento */
+.pf-grid3 { display: grid; grid-template-columns: 246px minmax(0, 1fr) minmax(0, 1.5fr); gap: 0.9rem; align-items: stretch; }
+.pf-grid3 .pf-card { padding: 0.85rem 1rem; }
+.pf-grid3 .pf-card h2 { font-size: 0.9rem; margin-bottom: 0.5rem; }
+@media (max-width: 1150px) { .pf-grid3 { grid-template-columns: 1fr; } }
+
+/* Donut más pequeño y leyenda densa */
+.pf-grid3 .pf-donut-wrap { width: 150px; height: 150px; margin: 0 auto 0.5rem; }
+.pf-grid3 .pf-donut-total { font-size: 0.85rem; }
+.pf-grid3 .pf-legend { gap: 0.25rem; }
+.pf-grid3 .pf-leg-item { font-size: 0.8rem; }
+
+/* Tabla de tenencias compacta */
+.pf-grid3 .pf-table td { padding: 0.42rem 0.45rem; }
+.pf-grid3 .pf-table th { padding: 0.32rem 0.45rem; }
+
+/* Gráfica de rendimiento con altura fija (no se corta) */
+.pf-perf-chart { height: 210px; }
+.pf-perf-head { margin-bottom: 0.5rem; }
+.pf-perf-head h2 { font-size: 0.9rem; }
+
+/* Pie de página: lectura + hint + nota, todo en una línea compacta */
+.pf-foot { font-size: 0.75rem; color: #94a3b8; text-align: center; margin: 0.3rem 0 0; line-height: 1.45; }
+.pf-foot strong { color: #cbd5e1; font-weight: 600; }
+.pf-foot-sep { color: #475569; margin: 0 0.25rem; }
+.pf-foot-pos { color: #22c55e; }
+.pf-foot-neg { color: #ef4444; }
+.pf-foot .pf-perf-note { display: block; color: #64748b; font-size: 0.7rem; margin-top: 0.15rem; }
