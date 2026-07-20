@@ -3368,6 +3368,45 @@ async function fetchCoinDailyHistory(coingeckoId, days) {
     }
 }
 
+// Valor total ACTUAL del portafolio (misma fuente que /api/portfolio): una /simple/price
+// cacheada + fallback a los precios guardados. `complete` = todas las monedas tuvieron precio.
+async function _currentPortfolioTotal(userId) {
+    const settings = (await dbLayer.getAllSettings(userId)) || {};
+    const held = [];
+    for (const c of COINS) {
+        const key = c.id === 'ripple' ? 'myXrpAmount' : ('myAmount_' + c.id);
+        const amt = parseFloat(settings[key]);
+        if (amt && amt > 0) held.push({ id: c.id, amount: amt });
+    }
+    if (!held.length) return { total: 0, complete: true, count: 0 };
+
+    const ids = held.map(h => h.id).sort().join(',');
+    const now = Date.now();
+    let priceMap = null;
+    if (_portfolioPriceCache.data && _portfolioPriceCache.ids === ids && (now - _portfolioPriceCache.at) < 60000) {
+        priceMap = _portfolioPriceCache.data;
+    } else {
+        try {
+            const resp = await coingeckoFetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=usd`);
+            if (resp.ok) { priceMap = await resp.json(); _portfolioPriceCache = { at: now, ids, data: priceMap }; }
+        } catch (e) { /* cae a stored */ }
+    }
+    let stored = {};
+    try { stored = readState() || {}; } catch (e) { stored = {}; }
+    const storedPrice = (id) => id === 'ripple'
+        ? (stored.marketData && stored.marketData.price)
+        : (stored.coins && stored.coins[id] && stored.coins[id].marketData && stored.coins[id].marketData.price);
+
+    let total = 0, complete = true;
+    for (const h of held) {
+        let price = (priceMap && priceMap[h.id] && typeof priceMap[h.id].usd === 'number') ? priceMap[h.id].usd : null;
+        if (price == null) { const sp = storedPrice(h.id); price = (typeof sp === 'number') ? sp : null; }
+        if (price == null) { complete = false; continue; }
+        total += h.amount * price;
+    }
+    return { total: Math.round(total * 100) / 100, complete, count: held.length };
+}
+
 app.get('/api/portfolio/history', requireAuth, async (req, res) => {
     try {
         const range = Math.min(Math.max(parseInt(req.query.range, 10) || 365, 7), 365);
@@ -3408,10 +3447,19 @@ app.get('/api/portfolio/history', requireAuth, async (req, res) => {
         for (const s of snaps) realByDay[s.date] = s.totalValue;
         const series = recon.map(pt => (realByDay[pt.date] != null ? { date: pt.date, value: realByDay[pt.date], real: true } : pt));
 
-        // Snapshot de HOY (upsert) — así el histórico real crece con cada visita.
+        // Valor de HOY: de los precios ACTUALES (como /api/portfolio), NO de la reconstrucción
+        // — que se degrada si el market_chart de una moneda falla. Se sobrescribe/añade el punto
+        // de hoy, y solo se snapshotea si TODAS las monedas tienen precio (no envenenar el histórico
+        // con un valor parcial, que fue justo el bug del snapshot de $66.88).
         const today = new Date().toISOString().slice(0, 10);
+        const cur = await _currentPortfolioTotal(req.user.id);
+        if (cur.total > 0) {
+            const todayPoint = { date: today, value: cur.total, real: true };
+            const idx = series.findIndex(p => p.date === today);
+            if (idx >= 0) series[idx] = todayPoint; else series.push(todayPoint);
+            if (cur.complete) dbLayer.snapshotPortfolio(req.user.id, today, cur.total).catch(() => {});
+        }
         const latest = series.length ? series[series.length - 1].value : null;
-        if (latest != null) { dbLayer.snapshotPortfolio(req.user.id, today, latest).catch(() => {}); }
 
         // P&L por fecha (no por índice): valor en o antes de (hoy - N días).
         const dayISO = (offset) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - offset); return d.toISOString().slice(0, 10); };
@@ -3421,13 +3469,19 @@ app.get('/api/portfolio/history', requireAuth, async (req, res) => {
             if (a == null || latest == null || a === 0) return null;
             return { abs: Math.round((latest - a) * 100) / 100, pct: Math.round((latest - a) / a * 10000) / 100 };
         };
-        const first = series.length ? series[0].value : null;
+        // "Desde inicio" = tu P&L REAL desde que registraste (primer snapshot real), NO desde el
+        // inicio de la reconstrucción de hace un año (eso sería una pérdida ficticia: no tenías
+        // estas monedas entonces). Si aún no hay snapshots, el ancla es el valor de hoy → 0%.
+        const anchorVal = snaps.length ? snaps[0].totalValue : cur.total;
+        const anchorDate = snaps.length ? snaps[0].date : today;
         const pnl = {
             d1: pnlFor(1), d7: pnlFor(7), d30: pnlFor(30),
-            sinceStart: (first != null && first > 0 && latest != null) ? { abs: Math.round((latest - first) * 100) / 100, pct: Math.round((latest - first) / first * 10000) / 100, from: series[0].date } : null,
+            sinceStart: (anchorVal != null && anchorVal > 0 && latest != null)
+                ? { abs: Math.round((latest - anchorVal) * 100) / 100, pct: Math.round((latest - anchorVal) / anchorVal * 10000) / 100, from: anchorDate }
+                : null,
         };
 
-        res.json({ series, pnl, latest, range, firstReal: snaps.length ? snaps[0].date : null });
+        res.json({ series, pnl, latest, range, firstReal: anchorDate });
     } catch (error) {
         console.error('Error en /api/portfolio/history:', error);
         res.status(500).json({ error: 'No se pudo calcular el rendimiento.' });
