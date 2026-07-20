@@ -7,7 +7,9 @@ Contexto esencial para que Claude (o cualquier asistente/dev) trabaje en el XRP 
 
 ## Qué es
 
-Dashboard local educativo de análisis de XRP. Stack deliberadamente simple: Node 18+ / Express, sin framework frontend, sin base de datos (estado en `data.json`), sin build step. Frontend en vanilla JS + Chart.js (CDN). Todo el texto de UI está en **español**.
+Dashboard local educativo de análisis de XRP. Stack: Node 18+ / Express, sin framework frontend, sin build step. **v2.8: toda la persistencia vive en MongoDB** (antes: `data.json` + SQLite). Frontend en vanilla JS + Chart.js (self-hosted). Todo el texto de UI está en **español**.
+
+> **v2.8 — BD unificada en MongoDB.** Usuarios/sesiones/ajustes Y el estado de mercado (antes `data.json`/`history.json`) viven ahora en Mongo (el mismo Mongo del Kali que ExpedAi/careflow). `lib/mongo.js` conecta; `lib/db.js` (async) hace users/sessions/settings; `lib/state.js` mantiene el estado de mercado en **memoria** (lecturas síncronas) con persistencia debounced a Mongo. El server NO arranca sin Mongo (`MONGODB_URI`/`MONGO_DB` en `.env`). `withDataFile()` conserva su firma pero ahora muta el espejo en memoria + agenda guardado. `mongo-selftest.js` verifica la capa contra un Mongo real.
 
 ## Comandos
 
@@ -26,7 +28,9 @@ Verificación: arrancar el servidor y revisar consola + navegador. Hay tests de 
 |---|---|---|
 | `server.js` | TODO el backend: fetchers de APIs, cálculos, endpoints Express, ciclo de refresco, auth wiring | ~2.600 líneas |
 | `lib/calc.js` | Funciones PURAS de cálculo (amountToXrp, RSI, MACD/EMA, drawdown, Pearson, VaR) — testeadas sin arrancar el server | ~150 líneas |
-| `lib/db.js` | **v2.3** Persistencia: SQLite nativo (`node:sqlite` → `dashboard.db`) con fallback JSON. API users/sessions/settings | ~230 líneas |
+| `lib/db.js` | **v2.8** Persistencia MongoDB (async) — colecciones users/sessions/settings/counters. Ids de usuario enteros vía `counters`. Misma API de antes pero async | ~145 líneas |
+| `lib/mongo.js` | **v2.8** Conexión única a MongoDB (`connect()`/`getDb()`), `MONGODB_URI`/`MONGO_DB` | ~55 líneas |
+| `lib/state.js` | **v2.8** Estado de mercado + histórico en Mongo con espejo en memoria: `readState()`/`readStateRaw()` (copia fresca), `withDataFile()` (muta memoria + persiste debounced), `flush()` | ~110 líneas |
 | `lib/auth.js` | **v2.3** Auth: scrypt, sesiones HttpOnly, rate-limit, `requireAuth`, rutas `/api/auth/*` | ~180 líneas |
 | `xrplBurnWatcher.js` | Módulo autónomo: WebSocket al XRPL (fallback REST) que trackea `total_coins` y buckets de quema | ~400 líneas |
 | `public/app.js` | Renderizado del frontend: `loadDashboardData()` + `render*()` + auth/i18n al final. **v2.4**: bilingüe completo (t(), `_isEn()`, `_pick()`) | ~3.300 líneas |
@@ -44,7 +48,7 @@ Verificación: arrancar el servidor y revisar consola + navegador. Hay tests de 
 ## Autenticación y BD (v2.3 — leer antes de tocar endpoints)
 
 - **TODOS los `/api/*` (salvo `/api/auth/*`) exigen sesión** con `requireAuth`. Cualquier endpoint nuevo que exponga datos del usuario DEBE llevar `requireAuth`. Sin sesión → 401 → el frontend muestra el overlay de login (`showAuthOverlay()` en app.js).
-- **BD**: `lib/db.js` elige motor solo — SQLite nativo (`dashboard.db`) o fallback JSON (`dashboard-db.json`). NO metas datos de mercado en la BD: `data.json`/`history.json` siguen siendo el estado del dashboard; la BD es SOLO usuarios/sesiones/ajustes. Ambos archivos de BD están en `.gitignore` (contienen credenciales) — NUNCA subir a git ni presentar al usuario.
+- **BD (v2.8 — MongoDB)**: `lib/db.js` habla con Mongo (async). Colecciones: `users`, `sessions`, `settings`, `counters` (autoincremento de ids), más `dashboard_state` y `dashboard_history` (estado de mercado, vía `lib/state.js`). El `.env` con `MONGODB_URI` (credenciales del Kali) está en `.gitignore` — NUNCA subir. El server hace `mongo.connect()` + `dbLayer.init()` + `state.init()` en el arranque ANTES de servir; una **puerta `mongoReady`** devuelve 503 a toda petición (salvo `/health`) hasta que la BD está lista.
 - **Ajustes por usuario**: `myXrpAmount` y `lang` se guardan por cuenta vía `/api/settings` (allowlist `ALLOWED_SETTINGS` — no añadir claves arbitrarias). `localStorage` es solo caché/fallback.
 - **Cookie sin `Secure`** a propósito (localhost/http). Si el dashboard se expone fuera de localhost, hace falta HTTPS + Secure (ver `lib/auth.js`).
 - **Cambio de contraseña**: `POST /api/auth/change-password` (botón ⚙ en el chip de usuario). Exige la contraseña actual, invalida todas las sesiones del usuario y re-emite la cookie del navegador actual. Al añadir campos sensibles nuevos sigue este patrón (verificar credencial actual antes de mutar).

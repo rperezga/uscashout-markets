@@ -55,6 +55,15 @@ const WHALE_THRESHOLD = 50000; // Umbral para detectar transferencias grandes
 // el número sigue siendo mayor, la unidad venía mal de la fuente → se descarta (0).
 const { amountToXrp, _dailyReturns, _mean, _stdDev, _smaLast, _emaArray, _rsiWilder, _maxDrawdown, _pearson, _percentile } = require('./lib/calc');
 
+// V2.8: la persistencia se mudó a MongoDB (el Mongo del Kali). El estado de mercado
+// (antes data.json/history.json) vive en Mongo con un espejo en memoria (lib/state.js);
+// usuarios/sesiones/ajustes también (lib/db.js). Se conecta en el arranque (más abajo)
+// ANTES de servir peticiones. `mongoReady` es la puerta que retiene las requests hasta
+// que la BD está lista.
+const mongo = require('./lib/mongo');
+const state = require('./lib/state');
+let mongoReady = false;
+
 // ===== V2.0: ESCRITURA SERIALIZADA de data.json =====
 // PROBLEMA REAL detectado en producción: el burn watcher escribe de forma asíncrona
 // (cada ~30 s) mientras los fetchers hacen su propio leer-todo → modificar → escribir-todo.
@@ -63,42 +72,24 @@ const { amountToXrp, _dailyReturns, _mean, _stdDev, _smaLast, _emaArray, _rsiWil
 // visibles a la vez en el tab Burn con valores contradictorios).
 // SOLUCIÓN: todos los escritores pasan por withDataFile(), que encadena las escrituras
 // en una promesa única: leer FRESCO → mutar solo su nodo → escribir atómico.
-let _dataFileLock = Promise.resolve();
-function withDataFile(mutator) {
-    _dataFileLock = _dataFileLock.then(() => {
-        const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-        mutator(data);
-        safeWriteFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
-    }).catch(e => console.error('withDataFile error:', e.message));
-    return _dataFileLock;
-}
-
-// Función de escritura atómica para prevenir corrupción de archivos
-function safeWriteFile(filePath, content, encoding) {
-    const tempPath = filePath + '.tmp';
-    try {
-        fs.writeFileSync(tempPath, content, encoding);
-        fs.renameSync(tempPath, filePath);
-    } catch (error) {
-        console.error(`Error escribiendo de forma atómica en ${filePath}:`, error);
-        try {
-            if (fs.existsSync(tempPath)) {
-                fs.unlinkSync(tempPath);
-            }
-        } catch (_) {}
-        throw error;
-    }
-}
+// V2.8: withDataFile ahora delega en lib/state.js (muta el espejo en memoria y agenda
+// el guardado a Mongo). MISMA firma y semántica de concurrencia que la versión de
+// fichero — los ~44 llamadores no cambian. `readState()`/`readStateRaw()` reemplazan a
+// `JSON.parse(fs.readFileSync(DATA_FILE))` y `fs.readFileSync(DATA_FILE,'utf8')` con una
+// copia FRESCA e independiente (misma semántica: quien la muta no toca el estado vivo).
+function withDataFile(mutator) { return state.withDataFile(mutator); }
+function readState() { return state.readState(); }
+function readStateRaw() { return state.readStateRaw(); }
 
 // ===== XRPL Burn Watcher (real-time burn via WebSocket + REST fallback) =====
 let burnWatcherSnapshot = null;
 const burnWatcher = startBurnWatcher({
     onUpdate: (snap) => {
         burnWatcherSnapshot = snap;
-        // Persistir el último snapshot dentro de data.json bajo burnImpact.realtime.
-        // V2.0: vía withDataFile para no pisar las escrituras de los fetchers (race condition
-        // que dejaba nodos mezclados de ciclos distintos).
-        if (!fs.existsSync(DATA_FILE)) return;
+        // Persistir el último snapshot bajo burnImpact.realtime vía withDataFile.
+        // V2.8: el watcher puede emitir antes de que el estado esté cargado de Mongo;
+        // si aún no está listo, se salta esta muestra (la siguiente la persiste).
+        if (!state.ready()) return;
         withDataFile((j) => {
             j.burnImpact = j.burnImpact || {};
             j.burnImpact.realtime = snap;
@@ -106,13 +97,15 @@ const burnWatcher = startBurnWatcher({
     }
 });
 
-// Sembrar el watcher con buckets previos del data.json (resiliencia ante reinicios)
-try {
-    if (fs.existsSync(DATA_FILE)) {
-        const j = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+// Sembrar el watcher con buckets previos (resiliencia ante reinicios). V2.8: el estado
+// se carga de Mongo en el arranque, así que esto se llama DESDE el bootstrap (más abajo),
+// no en la carga del módulo (cuando Mongo aún no está conectado).
+function seedBurnWatcherFromState() {
+    try {
+        const j = readState();
         if (j.burnImpact && j.burnImpact.realtime) burnWatcher.injectSeed(j.burnImpact.realtime);
-    }
-} catch (e) { /* ignore seed errors */ }
+    } catch (e) { /* ignore seed errors */ }
+}
 
 const MONITORED_WALLETS = [
     { address: "rLNaPhS9K78Dbi4oAppSKXijcyS8YDXM6F", label: "Upbit Cold Wallet", type: "exchange" },
@@ -177,8 +170,16 @@ app.use(express.json({ limit: '32kb' }));
 // del usuario queda detrás del sign-in.
 const dbLayer = require('./lib/db');
 const { registerAuthRoutes, requireAuth } = require('./lib/auth');
-console.log(`BD activa: ${dbLayer.getEngine() === 'sqlite' ? 'SQLite nativo (dashboard.db)' : 'fallback JSON (dashboard-db.json) — Node sin node:sqlite'}`);
 registerAuthRoutes(app);
+
+// V2.8: PUERTA DE ARRANQUE. Hasta que Mongo esté conectado y el estado cargado,
+// toda petición (salvo /health) recibe 503. Se registra ANTES que el resto de rutas
+// para que ninguna corra contra una BD aún no lista. app.listen puede bindear ya el
+// puerto; las requests se retienen aquí hasta mongoReady.
+app.use((req, res, next) => {
+    if (mongoReady || req.path === '/health') return next();
+    res.status(503).json({ error: 'Arrancando (conectando a la base de datos)…', code: 'STARTING' });
+});
 
 // Ajustes por usuario (claves permitidas explícitamente: nada arbitrario en BD)
 const ALLOWED_SETTINGS = new Set(['myXrpAmount', 'lang', 'activeCoin']);
@@ -186,22 +187,22 @@ const ALLOWED_SETTINGS = new Set(['myXrpAmount', 'lang', 'activeCoin']);
 // cerrado para no abrir la allowlist a claves arbitrarias.
 const SETTING_KEY_PATTERN = /^myAmount_[a-z0-9-]{2,50}$/;
 
-app.get('/api/settings', requireAuth, (req, res) => {
+app.get('/api/settings', requireAuth, async (req, res) => {
     try {
-        res.json(dbLayer.getAllSettings(req.user.id));
+        res.json(await dbLayer.getAllSettings(req.user.id));
     } catch (e) {
         res.status(500).json({ error: 'No se pudieron leer los ajustes.' });
     }
 });
 
-app.post('/api/settings', requireAuth, (req, res) => {
+app.post('/api/settings', requireAuth, async (req, res) => {
     try {
         const { key, value } = req.body || {};
         // V2.5: además de la allowlist fija, se aceptan cantidades por moneda
         // (myAmount_<coingeckoId>) con patrón cerrado.
         if (!ALLOWED_SETTINGS.has(key) && !SETTING_KEY_PATTERN.test(String(key))) return res.status(400).json({ error: 'Clave de ajuste no permitida.' });
         if (String(value).length > 200) return res.status(400).json({ error: 'Valor demasiado largo.' });
-        dbLayer.setSetting(req.user.id, key, value);
+        await dbLayer.setSetting(req.user.id, key, value);
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: 'No se pudo guardar el ajuste.' });
@@ -241,10 +242,8 @@ const initialData = {
     etfFlows: null
 };
 
-if (!fs.existsSync(DATA_FILE)) {
-    console.log('El archivo data.json no existe. Creando archivo con estructura inicial...');
-    safeWriteFile(DATA_FILE, JSON.stringify(initialData, null, 2), 'utf8');
-}
+// V2.8: el estado inicial ya no se escribe a un fichero. `initialData` se pasa a
+// state.init() en el bootstrap: si Mongo no tiene aún el doc de estado, se siembra con esto.
 
 // ============================================================
 // Bugfix (v2.2): en la verificación en vivo de Semana 3 se detectaron HTTP 429
@@ -291,7 +290,7 @@ async function fetchMarketData() {
             const rippleData = apiDataArray[0];
             
             // Leer y parsear el archivo actual
-            const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+            const rawData = readStateRaw();
             const data = JSON.parse(rawData);
             
             // Actualizar el nodo de marketData
@@ -388,7 +387,7 @@ async function fetchOnChainData() {
         if (apiData && apiData.ledgers && apiData.ledgers.length > 0) {
             const latestLedgerObj = apiData.ledgers[0];
             
-            const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+            const rawData = readStateRaw();
             const data = JSON.parse(rawData);
             
             const totalCoinsXrp = Math.floor(latestLedgerObj.total_coins / 1000000);
@@ -420,7 +419,7 @@ async function fetchChartData() {
         
         if (apiData && apiData.prices) {
             // Leer y parsear el archivo actual
-            const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+            const rawData = readStateRaw();
             const data = JSON.parse(rawData);
             
             // Extraer y guardar array simple de timestamp/precios
@@ -435,7 +434,7 @@ async function fetchChartData() {
 // Calcular Indicadores Técnicos usando data.json (chartData)
 async function calculateTechnicals() {
     try {
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
         
         if (data.chartData && data.chartData.length > 0) {
@@ -543,7 +542,7 @@ async function fetchSpyDailySeries() {
 
 async function calculateAdvancedMetrics() {
     try {
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
 
         if (!data.chartData || !Array.isArray(data.chartData) || data.chartData.length < 60) {
@@ -910,7 +909,7 @@ async function fetchSentimentData() {
         if (apiData && apiData.data && apiData.data.length > 0) {
             const current = apiData.data[0];
             
-            const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+            const rawData = readStateRaw();
             const data = JSON.parse(rawData);
             
             // Guardar en el nodo sentiment
@@ -995,7 +994,7 @@ async function fetchOrderFlowData() {
             const buyPercent = (totalBuyVolume / totalVolume) * 100;
             const sellPercent = (sellVolume / totalVolume) * 100;
 
-            const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+            const rawData = readStateRaw();
             const data = JSON.parse(rawData);
             
             const orderFlow = {
@@ -1133,7 +1132,7 @@ async function fetchEscrowOnChainData() {
 // Actualizar información de eventos (Ej. Escrow de Ripple)
 async function updateEvents() {
     try {
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
 
         // Calcular días hasta el primer día del próximo mes
@@ -1194,7 +1193,7 @@ async function updateEvents() {
 // Calcular Proyecciones y Escenarios
 async function calculateProjections() {
     try {
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
         
         if (data.marketData && data.marketData.price && data.technicals && data.technicals.support) {
@@ -1243,8 +1242,8 @@ async function fetchNewsData() {
         // Cargar noticias existentes para caché
         let newsCache = new Map();
         try {
-            if (fs.existsSync(DATA_FILE)) {
-                const currentData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+            if (state.ready()) {
+                const currentData = readState();
                 if (Array.isArray(currentData.newsFeed)) {
                     currentData.newsFeed.forEach(n => {
                         if (n.url) newsCache.set(n.url, n);
@@ -1439,7 +1438,7 @@ async function refreshTrackedWalletsFromWellKnown() {
 async function fetchWhaleData() {
     try {
         console.log('--- Iniciando Sincronización Whale Tracker (XRPSCAN) ---');
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
 
         // Asegurar que la estructura existe
@@ -1653,7 +1652,7 @@ async function fetchWhaleData() {
 async function fetchSupplyDistributionData() {
     try {
         console.log('--- Sincronizando Supply Distribution (XRPL Metrics) ---');
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
 
         // V2.0: el endpoint /api/v1/network/metrics de XRPScan devuelve 404 (verificado
@@ -1713,7 +1712,7 @@ async function fetchSupplyDistributionData() {
 async function fetchBurnImpactData() {
     try {
         console.log('--- Sincronizando Burn Impact (XRPL Trends) ---');
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
 
         let totalCoins = 99987000000;
@@ -1859,7 +1858,7 @@ async function fetchWalletHistory(address) {
         const apiData = await response.json();
         const transactions = Array.isArray(apiData) ? apiData : (apiData.transactions || []);
         
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
 
         const history = transactions.slice(0, 50).map(tx => {
@@ -1911,9 +1910,8 @@ async function fetchWalletHistory(address) {
 // La protección "conservar data previa si el fetch no trae nada" las perpetuaba.
 // Esta migración descarta cualquier monto físicamente imposible y recalcula el summary.
 function sanitizeWhaleData() {
-    try {
-        if (!fs.existsSync(DATA_FILE)) return;
-        const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    // V2.8: muta el estado vivo vía withDataFile (persiste a Mongo). Corre en el arranque.
+    return withDataFile((data) => {
         const wt = data.whaleTracker;
         if (!wt || !Array.isArray(wt.largeTransfers)) return;
 
@@ -1947,20 +1945,14 @@ function sanitizeWhaleData() {
         if (Array.isArray(wt.flowEvents)) {
             wt.flowEvents = wt.flowEvents.filter(e => e && isFinite(e.amount) && e.amount > 0 && e.amount <= MAX_SANE);
         }
-        safeWriteFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
         console.log(`SANEADO whale: ${before - clean.length} transferencias con unidades corruptas descartadas; summary recalculado.`);
-    } catch (e) {
-        console.error('Error saneando datos whale:', e.message);
-    }
+    });
 }
 
 // --- SEEDING: Datos Mock para Whale Tracker ---
 function seedWhaleTrackerMockData() {
-    try {
-        if (!fs.existsSync(DATA_FILE)) return;
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
-        const data = JSON.parse(rawData);
-        
+    // V2.8: siembra vía withDataFile (muta estado vivo + persiste a Mongo).
+    return withDataFile((data) => {
         console.log('Sembrando datos MOCK para Whale Tracker...');
         data.whaleTracker = {
             summary: {
@@ -1989,12 +1981,8 @@ function seedWhaleTrackerMockData() {
             walletHistory: [],
             walletHistoryCache: {}
         };
-        
-        safeWriteFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
         console.log('--- SEED: Whale Tracker Mock Data inyectada ---');
-    } catch (e) {
-        console.error('Error sembrando mock data:', e);
-    }
+    });
 }
 
 // ============================================================
@@ -2225,7 +2213,7 @@ async function fetchRlusdSplitData() {
         }
 
         // Market cap total (XRPL + Ethereum) viene de data.ecosystem (CoinGecko, ya fetcheado en el ciclo)
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
         const totalSupplyUsd = data.ecosystem && typeof data.ecosystem.rlusdMarketCapUsd === 'number'
             ? data.ecosystem.rlusdMarketCapUsd
@@ -2280,7 +2268,7 @@ async function fetchAmmDexData() {
         const pools = await resp.json();
         if (!Array.isArray(pools)) throw new Error('respuesta inesperada (no es array)');
 
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
         const xrpPrice = (data.marketData && data.marketData.price) || 0;
 
@@ -2330,7 +2318,7 @@ async function fetchAmmDexData() {
 // ============================================================
 async function buildDailyBrief() {
     try {
-        const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        const data = readState();
         const señales = [];
         const am = data.advancedMetrics || {};
         const price = (data.marketData && data.marketData.price) || 0;
@@ -2526,24 +2514,18 @@ async function buildDailyBrief() {
 // hasta que el día cambia y queda fijada). Sin esto el dashboard solo sabe decir
 // "ahora" — desbloquea sparklines (#7), holders underwater (#10) y backtesting (#19).
 // ============================================================
-const HISTORY_FILE = path.join(__dirname, 'history.json');
 const HISTORY_MAX_DAYS = 400; // ~13 meses de histórico antes de rotar entradas antiguas
 
+// V2.8: el histórico vive en Mongo (lib/state.js). readHistoryFile() conserva el nombre
+// (lo usan appendDailyHistorySnapshot y GET /api/history) pero devuelve el array desde el
+// espejo en memoria — una copia, para que quien lo mute no toque el estado vivo.
 function readHistoryFile() {
-    try {
-        if (!fs.existsSync(HISTORY_FILE)) return [];
-        const raw = fs.readFileSync(HISTORY_FILE, 'utf8');
-        const arr = JSON.parse(raw);
-        return Array.isArray(arr) ? arr : [];
-    } catch (e) {
-        console.error('Error leyendo history.json (se trata como vacío):', e.message);
-        return [];
-    }
+    return state.readHistory();
 }
 
 async function appendDailyHistorySnapshot() {
     try {
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
         const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 
@@ -2575,8 +2557,8 @@ async function appendDailyHistorySnapshot() {
             history = history.slice(history.length - HISTORY_MAX_DAYS);
         }
 
-        safeWriteFile(HISTORY_FILE, JSON.stringify(history, null, 2), 'utf8');
-        console.log(`history.json: snapshot de ${today} guardado (${history.length} días acumulados).`);
+        state.setHistory(history);
+        console.log(`history (Mongo): snapshot de ${today} guardado (${history.length} días acumulados).`);
     } catch (error) {
         console.error('Error guardando snapshot diario en history.json:', error.message);
     }
@@ -2970,7 +2952,7 @@ async function fetchCoinNews(coin) {
 // --- Brief bilingüe genérico (subset del buildDailyBrief de XRP) ---
 async function buildCoinBrief(coin) {
     try {
-        const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        const data = readState();
         const node = (data.coins && data.coins[coin.id]) || {};
         const am = node.advancedMetrics || {};
         const price = (node.marketData && node.marketData.price) || 0;
@@ -3109,7 +3091,7 @@ async function multiCoinCycle() {
             coinRotationIdx++;
             let stale = true;
             try {
-                const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+                const data = readState();
                 const last = data.coins && data.coins[coin.id] && data.coins[coin.id].lastCycleAt;
                 stale = !last || (Date.now() - new Date(last).getTime()) > 25 * 60000;
             } catch (e) { /* si no se puede leer, refrescar */ }
@@ -3193,29 +3175,37 @@ async function refreshAllData() {
     }
 }
 
-// Inicializar todos los datos al arrancar de forma secuencial y segura
+// V2.8: BOOTSTRAP — conectar Mongo y cargar el estado ANTES de sembrar/refrescar/servir.
+// Sin BD no hay login ni estado; si Mongo no responde, fallar claro y salir (pm2 reintenta).
 (async () => {
-    // Solo sembramos si data.json no existe o no tiene whaleTracker
-    let needsSeed = true;
     try {
-        if (fs.existsSync(DATA_FILE)) {
-            const currentData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-            if (currentData.whaleTracker && currentData.whaleTracker.largeTransfers && currentData.whaleTracker.largeTransfers.length > 0) {
-                needsSeed = false;
-            }
-        }
-    } catch (e) {}
-
-    if (needsSeed) {
-        seedWhaleTrackerMockData();
+        await mongo.connect();
+        await dbLayer.init();
+        await state.init(initialData, []);
+        mongoReady = true;
+        console.log(`MongoDB conectado (db "${mongo.getDbName()}"); estado cargado. Usuarios y estado de mercado viven en Mongo.`);
+        seedBurnWatcherFromState();
+    } catch (e) {
+        console.error('FATAL: no se pudo conectar a MongoDB — el dashboard no arranca sin BD:', e && e.message);
+        process.exit(1);
     }
 
-    // V2.0: sanear montos imposibles heredados de versiones con el bug de unidades
-    sanitizeWhaleData();
-
-    // V2.5: restaurar la moneda activa entre reinicios (persistida en data.json)
+    // Sembrar mocks de whale solo si el estado no trae ya transferencias
+    let needsSeed = true;
     try {
-        const cur = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        const currentData = readState();
+        if (currentData.whaleTracker && Array.isArray(currentData.whaleTracker.largeTransfers) && currentData.whaleTracker.largeTransfers.length > 0) {
+            needsSeed = false;
+        }
+    } catch (e) {}
+    if (needsSeed) await seedWhaleTrackerMockData();
+
+    // V2.0: sanear montos imposibles heredados de versiones con el bug de unidades
+    await sanitizeWhaleData();
+
+    // V2.5: restaurar la moneda activa entre reinicios (persistida en el estado)
+    try {
+        const cur = readState();
         if (cur.activeCoin && coinById(cur.activeCoin) && !coinById(cur.activeCoin).legacy) {
             activeGenericCoin = cur.activeCoin;
             console.log(`Multi-moneda: moneda activa restaurada → ${coinById(cur.activeCoin).symbol}`);
@@ -3224,19 +3214,18 @@ async function refreshAllData() {
 
     await refreshAllData();
 
-    // V2.5: ciclo multi-moneda desfasado ~2,5 min del ciclo XRP para no chocar
-    // con sus ráfagas de CoinGecko (comparten el mismo rate limit del free tier).
+    // V2.5: ciclo multi-moneda desfasado ~2,5 min del ciclo XRP (comparten rate limit CoinGecko).
     setTimeout(() => {
         multiCoinCycle();
         setInterval(multiCoinCycle, 300000);
     }, 150000);
-})();
 
-// Auto-Refresh: Programar la ejecución en bucle cada 5 minutos (300000ms)
-setInterval(async () => {
-    console.log('--- Iniciando Refresh Automático ---');
-    await refreshAllData();
-}, 300000);
+    // Auto-refresh XRP cada 5 min — DENTRO del bootstrap para no dispararse antes de tener BD/estado.
+    setInterval(async () => {
+        console.log('--- Iniciando Refresh Automático ---');
+        await refreshAllData();
+    }, 300000);
+})();
 
 // Servir la carpeta estática "public" donde estará el frontend
 app.use(express.static(path.join(__dirname, 'public')));
@@ -3245,7 +3234,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // V2.3: requiere sesión — el dashboard entero queda detrás del sign-in.
 app.get('/api/data', requireAuth, (req, res) => {
     try {
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         // Parseamos y volvemos a enviarlo como JSON
         const data = JSON.parse(rawData);
         res.json(data);
@@ -3267,7 +3256,7 @@ let _portfolioPriceCache = { at: 0, ids: '', data: null };
 
 app.get('/api/portfolio', requireAuth, async (req, res) => {
     try {
-        const settings = dbLayer.getAllSettings(req.user.id) || {};
+        const settings = (await dbLayer.getAllSettings(req.user.id)) || {};
         // Tenencias desde los ajustes por usuario — la MISMA clave que "My Crypto"
         // (XRP: myXrpAmount por compat; el resto: myAmount_<coingeckoId>).
         const held = [];
@@ -3307,7 +3296,7 @@ app.get('/api/portfolio', requireAuth, async (req, res) => {
         // Fallback: precios ya guardados en data.json (si CoinGecko no respondió,
         // o para una moneda concreta que no vino en la respuesta).
         let stored = {};
-        try { stored = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) || {}; } catch (e) { stored = {}; }
+        try { stored = readState() || {}; } catch (e) { stored = {}; }
         const storedPriceOf = (id) => {
             if (id === 'ripple') return { price: stored.marketData?.price ?? null, change: stored.marketData?.priceChange24h ?? null };
             const node = stored.coins && stored.coins[id] && stored.coins[id].marketData;
@@ -3417,7 +3406,7 @@ app.post('/api/coins/activate', requireAuth, async (req, res) => {
         // ¿Datos fríos? (sin FASE A o con más de 5 min)
         let needsFast = true;
         try {
-            const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+            const data = readState();
             const last = data.coins && data.coins[coin.id] && data.coins[coin.id].lastFastAt;
             needsFast = !last || (Date.now() - new Date(last).getTime()) > 5 * 60000;
         } catch (e) { /* refrescar */ }
@@ -3437,7 +3426,7 @@ app.post('/api/coins/activate', requireAuth, async (req, res) => {
 app.get('/api/wallet-history/:address', requireAuth, async (req, res) => {
     try {
         const address = req.params.address;
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
+        const rawData = readStateRaw();
         const data = JSON.parse(rawData);
 
         // Verificar cache (10 minutos)
@@ -3514,7 +3503,7 @@ app.post('/api/refresh', requireAuth, async (req, res) => {
 app.get('/health', (req, res) => {
     let lastCycleAt = null;
     try {
-        const d = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        const d = readState();
         lastCycleAt = (d.marketData && d.marketData.lastUpdated) || null;
     } catch (e) { /* si no se puede leer, se reporta como null */ }
     res.json({
@@ -3533,7 +3522,7 @@ app.get('/', (req, res) => {
 
 // Iniciar el servidor
 const server = app.listen(PORT, HOST, () => {
-    console.log(`USCashout Markets (crypto dashboard) v2.7 running on http://${HOST}:${PORT}${IS_PROD ? ' (modo PRODUCCIÓN: cookie Secure + HSTS)' : ''}`);
+    console.log(`USCashout Markets (crypto dashboard) v2.8 running on http://${HOST}:${PORT}${IS_PROD ? ' (modo PRODUCCIÓN: cookie Secure + HSTS)' : ''}`);
 });
 
 // ===== V2.6: ROBUSTEZ DEL PROCESO (necesario para correr bajo pm2) =====
@@ -3557,8 +3546,8 @@ async function gracefulShutdown(signal) {
     console.log(`\n${signal} recibido — cerrando ordenadamente...`);
     server.close(() => console.log('Servidor HTTP cerrado.'));
     try {
-        await _dataFileLock; // espera la escritura pendiente (cola de withDataFile)
-        console.log('Escrituras de data.json completadas.');
+        await state.flush(); // V2.8: fuerza el guardado pendiente del estado a Mongo
+        console.log('Estado persistido en Mongo.');
     } catch (e) { /* ya se loguea dentro de withDataFile */ }
     setTimeout(() => process.exit(0), 500).unref();
 }

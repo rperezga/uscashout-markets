@@ -1,6 +1,6 @@
 {
   "name": "xrp-dashboard",
-  "version": "2.7.2",
+  "version": "2.8.0",
   "description": "Local XRP Analytics Dashboard",
   "main": "server.js",
   "scripts": {
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "express": "^4.18.2",
+    "mongodb": "^6.21.0",
     "openai": "^6.34.0",
     "ws": "^8.20.1"
   }
