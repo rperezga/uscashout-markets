@@ -2,7 +2,7 @@
 // mongo-selftest.js — verificación de la capa MongoDB (v2.8) contra un Mongo REAL.
 //
 // Uso (Hermes, en el Kali, contra una base de datos DE PRUEBA — NUNCA producción):
-//   MONGO_DB=uscashout_selftest MONGODB_URI="mongodb://usuario:pass@127.0.0.1:27017/?authSource=admin" \
+//   MONGO_DB=uscashout_selftest MONGODB_URI="mongodb://<usuario>:<contraseña>@127.0.0.1:27017/?authSource=admin" \
 //     node mongo-selftest.js
 //
 // Ejercita: usuarios (ids enteros, unicidad), sesiones (válida/caducada/borrada),
