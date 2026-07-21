@@ -14,7 +14,7 @@ npm start
 # Abrir http://localhost:3000
 ```
 
-Requisitos: Node.js 18+ y **MongoDB accesible** (`MONGODB_URI`/`MONGO_DB` en `.env`; el server no arranca sin BD — gate 503 hasta que conecta). Verificación de la capa de datos: `NOOP1` contra una BD de prueba.
+Requisitos: Node.js 18+ y **MongoDB accesible** (`MONGODB_URI`/`MONGO_DB` en `.env`; el server no arranca sin BD — gate 503 hasta que conecta). Verificación de la capa de datos: `mongo-selftest.js` contra una BD de prueba.
 
 > ★ El **primer usuario registrado se convierte en owner**. En un despliegue nuevo, regístrate tú antes de compartir la URL.
 
