@@ -3706,6 +3706,62 @@ app.post('/api/refresh', requireAuth, async (req, res) => {
 // V2.6 — GET /health: liveness check SIN autenticación (lo consultan pm2 y el
 // Cloudflare Tunnel, que no tienen sesión). No expone datos de usuario: solo si el
 // proceso vive, qué motor de BD hay y si los ciclos de datos están corriendo.
+// ============================================================
+// V2.9: QUÉ VERSIÓN ESTÁ DESPLEGADA (sello de build en /health)
+// ============================================================
+// Problema real: con el deploy en el Kali (git pull + pm2) no había forma de saber
+// desde fuera si lo que corre en uscashout.com es el último commit o uno de hace
+// una semana — `uptimeSeconds` solo dice cuándo se reinició, no QUÉ código carga.
+// Ahora /health devuelve el commit desplegado: basta compararlo con el último de
+// GitHub para responder "¿está online mi última versión?".
+//
+// Se lee UNA vez al arrancar (no por petición) y leyendo ficheros, sin ejecutar
+// `git` ni añadir dependencias: si el deploy no lleva .git (tarball/rsync), se
+// puede fijar la variable de entorno APP_COMMIT y se usa esa.
+//
+// OJO: express.static sirve los ficheros del disco en CADA petición, así que un
+// `git pull` SIN reiniciar deja un estado híbrido (HTML/CSS/JS nuevos con el
+// server.js viejo en memoria). Este sello se calcula al arrancar precisamente
+// para delatar ese caso: si el commit de /health no cambia, no hubo reinicio.
+function readDeployedCommit() {
+    if (process.env.APP_COMMIT) return process.env.APP_COMMIT.trim();
+    try {
+        const gitDir = path.join(__dirname, '.git');
+        const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+
+        // HEAD desacoplado: el propio SHA
+        if (/^[0-9a-f]{40}$/i.test(head)) return head;
+
+        // Caso normal: "ref: refs/heads/main"
+        const ref = head.startsWith('ref:') ? head.slice(4).trim() : null;
+        if (!ref) return null;
+
+        // Ref suelta
+        try {
+            const sha = fs.readFileSync(path.join(gitDir, ref), 'utf8').trim();
+            if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
+        } catch (e) { /* puede estar empaquetada: se mira packed-refs */ }
+
+        // Ref empaquetada (tras un `git gc`, habitual en un clon de deploy)
+        const packed = fs.readFileSync(path.join(gitDir, 'packed-refs'), 'utf8');
+        for (const line of packed.split('\n')) {
+            if (line.startsWith('#')) continue;
+            const [sha, name] = line.trim().split(/\s+/);
+            if (name === ref && /^[0-9a-f]{40}$/i.test(sha)) return sha;
+        }
+        return null;
+    } catch (e) {
+        return null; // sin .git (deploy por copia): queda en null salvo APP_COMMIT
+    }
+}
+
+const APP_VERSION = (() => {
+    try { return require('./package.json').version || null; } catch (e) { return null; }
+})();
+const DEPLOYED_COMMIT = readDeployedCommit();
+const STARTED_AT = new Date().toISOString();
+console.log(`Versión desplegada: v${APP_VERSION || '?'} · commit ${DEPLOYED_COMMIT ? DEPLOYED_COMMIT.slice(0, 7) : 'desconocido (sin .git ni APP_COMMIT)'}`);
+
 app.get('/health', (req, res) => {
     let lastCycleAt = null;
     try {
@@ -3714,6 +3770,10 @@ app.get('/health', (req, res) => {
     } catch (e) { /* si no se puede leer, se reporta como null */ }
     res.json({
         ok: true,
+        version: APP_VERSION,
+        commit: DEPLOYED_COMMIT ? DEPLOYED_COMMIT.slice(0, 7) : null,
+        commitFull: DEPLOYED_COMMIT,
+        startedAt: STARTED_AT,
         uptimeSeconds: Math.round(process.uptime()),
         db: dbLayer.getEngine(),
         lastCycleAt,

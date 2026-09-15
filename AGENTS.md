@@ -120,6 +120,13 @@ Verificación: arrancar el servidor y revisar consola + navegador. Hay tests de 
   acepta la conexión y no responde nunca, el ciclo de refresco entero se queda colgado.
 - **`GET /health`** (sin auth): liveness para pm2 y el túnel. Es el ÚNICO endpoint sin `requireAuth`
   junto a `/api/auth/*`; no expone datos de usuario.
+- **Sello de versión desplegada (v2.9)**: `/health` devuelve `version` (de package.json), `commit`
+  (corto) y `commitFull`, leídos **una vez al arrancar** desde `.git/HEAD` (resuelve refs sueltas y
+  `packed-refs`, sin ejecutar `git` ni añadir deps). Si el deploy no lleva `.git` (tarball/rsync),
+  fija `APP_COMMIT` en el entorno. Sirve para responder "¿está online mi última versión?" comparando
+  ese hash con el último commit de GitHub. **Detecta el deploy a medias**: como `express.static` lee
+  del disco en cada petición, un `git pull` SIN `pm2 restart` sirve el HTML/CSS/JS nuevo con el
+  `server.js` viejo en memoria — en ese caso `commit` y `startedAt` no cambian y lo delatan.
 - **Cierre limpio**: `SIGTERM`/`SIGINT` esperan a que termine la escritura pendiente de `data.json`
   antes de salir. `unhandledRejection`/`uncaughtException` se registran pero NO matan el proceso.
 - **Chart.js SELF-HOSTED (v2.7)**: `public/vendor/chart.umd.min.js` (4.4.7, del tarball oficial de npm);
