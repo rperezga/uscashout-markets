@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <!-- viewport-fit=cover + safe-area en el CSS: el bottom-nav no queda bajo la barra
+         de gestos del iPhone y la cabecera respeta el notch. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="color-scheme" content="dark">
+    <!-- Si alguien lo añade a la pantalla de inicio, abre en modo app -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="USCashout">
+    <title>USCashout Markets — Mi Portafolio</title>
+    <meta name="description" content="USCashout Markets — versión móvil: el valor real de tu portafolio cripto, de un vistazo.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%230f172a'/%3E%3Ctext x='16' y='22' font-size='15' font-weight='bold' text-anchor='middle' fill='%230ea5e9' font-family='Arial'%3EX%3C/text%3E%3C/svg%3E">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- RUTAS ABSOLUTAS a propósito: este HTML se sirve tanto en "/" (detección por
+         User-Agent) como en /mobile/index.html. Con rutas relativas, servirlo en "/"
+         rompería todos los assets. -->
+    <link rel="stylesheet" href="/mobile/mobile.css?v=1">
+    <script src="/vendor/chart.umd.min.js?v=4.4.7"></script>
+    <!-- Mismo motor i18n que el escritorio: el idioma guardado en la cuenta manda en
+         ambas versiones (no hay dos diccionarios que mantener). -->
+    <script src="/i18n.js?v=8"></script>
+</head>
+<body>
+
+<!-- ============ SPLASH DE ARRANQUE ============
+     Se muestra hasta saber si hay sesión (y mientras el servidor conecta a Mongo,
+     que responde 503 hasta estar listo). Sin esto habría un parpadeo en blanco
+     antes de decidir entre login y portafolio. -->
+<div id="m-boot" class="m-boot">
+    <div class="m-brand-mark">X</div>
+    <p id="m-boot-msg" class="m-note"></p>
+</div>
+
+<!-- ============ PANTALLA DE LOGIN (a pantalla completa, no overlay) ============
+     En escritorio el login es un overlay sobre el dashboard; en móvil es la pantalla
+     entera: no hay nada detrás que mirar hasta que hay sesión. -->
+<section id="m-auth" class="m-auth" hidden>
+    <div class="m-auth-inner">
+        <div class="m-brand">
+            <div class="m-brand-mark">X</div>
+            <h1>USCashout <span>Markets</span></h1>
+        </div>
+        <h2 id="m-auth-title" data-i18n="auth.titulo">Iniciar sesión</h2>
+        <p class="m-auth-sub" data-i18n="m.authSub">Tu portafolio vive detrás de tu cuenta.</p>
+
+        <form id="m-auth-form" autocomplete="on" novalidate>
+            <label for="m-user" data-i18n="auth.usuario">Usuario</label>
+            <input id="m-user" name="username" type="text" autocomplete="username"
+                   autocapitalize="none" autocorrect="off" spellcheck="false"
+                   inputmode="text" minlength="3" maxlength="30" required>
+
+            <label for="m-pass" data-i18n="auth.password">Contraseña</label>
+            <input id="m-pass" name="password" type="password" autocomplete="current-password"
+                   minlength="8" required>
+
+            <div id="m-auth-error" class="m-error" role="alert" hidden></div>
+            <button type="submit" id="m-auth-submit" class="m-btn-primary" data-i18n="auth.entrar">Entrar</button>
+        </form>
+
+        <button id="m-auth-toggle" class="m-btn-link" data-i18n="auth.toggleRegistro">¿No tienes cuenta? Regístrate</button>
+        <p id="m-auth-firstnote" class="m-note" hidden data-i18n="auth.primerUsuario">La primera cuenta creada queda como propietaria de este dashboard.</p>
+
+        <div class="m-auth-foot">
+            <button id="lang-toggle-btn" class="m-btn-ghost" type="button">🌐 EN</button>
+            <a class="m-btn-ghost" href="/desktop" data-i18n="m.verEscritorio">Ver versión completa</a>
+        </div>
+    </div>
+</section>
+
+<!-- ============ APP (visible solo con sesión) ============ -->
+<div id="m-app" class="m-app" hidden>
+
+    <header class="m-header">
+        <div class="m-header-brand">
+            <div class="m-brand-mark sm">X</div>
+            <span>USCashout</span>
+        </div>
+        <button id="m-refresh" class="m-icon-btn" type="button" aria-label="Refrescar" data-i18n-title="btn.refrescar" title="Refrescar">
+            <span id="m-refresh-ico">↻</span>
+        </button>
+    </header>
+
+    <main class="m-main">
+
+        <!-- ---------- VISTA: PORTAFOLIO ---------- -->
+        <section id="view-portfolio" class="m-view active">
+            <div id="m-pf-body">
+                <div class="m-skeleton-hero"></div>
+                <div class="m-skeleton-row"></div>
+                <div class="m-skeleton-row"></div>
+            </div>
+        </section>
+
+        <!-- ---------- VISTA: CUENTA ---------- -->
+        <section id="view-account" class="m-view">
+            <div class="m-card">
+                <div class="m-acc-user">
+                    <div class="m-avatar" id="m-avatar">·</div>
+                    <div>
+                        <div class="m-acc-name" id="m-acc-name">—</div>
+                        <div class="m-acc-role" id="m-acc-role"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="m-card">
+                <h3 data-i18n="m.idioma">Idioma</h3>
+                <div class="m-seg" id="m-lang-seg" role="group">
+                    <button type="button" class="m-seg-btn" data-lang="es">Español</button>
+                    <button type="button" class="m-seg-btn" data-lang="en">English</button>
+                </div>
+            </div>
+
+            <div class="m-card">
+                <h3 data-i18n="acc.cambiar">Cambiar contraseña</h3>
+                <form id="m-pass-form" autocomplete="off">
+                    <label for="m-pass-cur" data-i18n="acc.actual">Contraseña actual</label>
+                    <input id="m-pass-cur" type="password" autocomplete="current-password" required>
+                    <label for="m-pass-new" data-i18n="acc.nueva">Nueva contraseña</label>
+                    <input id="m-pass-new" type="password" autocomplete="new-password" minlength="8" required>
+                    <div id="m-pass-msg" class="m-error" role="alert" hidden></div>
+                    <button type="submit" class="m-btn-primary" data-i18n="acc.guardar">Cambiar contraseña</button>
+                    <p class="m-note" data-i18n="acc.nota">Al cambiarla se cerrarán las sesiones de otros dispositivos. Mínimo 8 caracteres.</p>
+                </form>
+            </div>
+
+            <div class="m-card">
+                <h3 data-i18n="m.masOpciones">Más</h3>
+                <a class="m-row-link" href="/desktop">
+                    <span data-i18n="m.verEscritorio">Ver versión completa</span>
+                    <span class="m-row-arrow">›</span>
+                </a>
+                <p class="m-note" data-i18n="m.escritorioNota">La versión completa tiene mercado, análisis técnico, ballenas, derivados y quema en vivo. Está pensada para pantalla grande.</p>
+                <button id="m-logout" class="m-btn-danger" type="button" data-i18n="btn.salir">Salir</button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ---------- BOTTOM NAV ----------
+         Estructura extensible: para añadir una vista nueva basta con un <button>
+         data-view="X" aquí y una <section id="view-X" class="m-view"> arriba.
+         mobile.js (showView) hace el resto: no hay que tocar más sitios. -->
+    <nav class="m-nav" id="m-nav" aria-label="Secciones">
+        <button class="m-nav-btn active" type="button" data-view="portfolio">
+            <span class="m-nav-ico">💼</span>
+            <span class="m-nav-lbl" data-i18n="nav.portfolio">Mi Portafolio</span>
+        </button>
+        <button class="m-nav-btn" type="button" data-view="account">
+            <span class="m-nav-ico">👤</span>
+            <span class="m-nav-lbl" data-i18n="m.cuenta">Cuenta</span>
+        </button>
+    </nav>
+</div>
+
+<script src="/mobile/mobile.js?v=1"></script>
+</body>
+</html>

@@ -169,7 +169,7 @@ app.use(express.json({ limit: '32kb' }));
 // TODOS los endpoints /api/* (salvo /api/auth/*) exigen sesión — la información
 // del usuario queda detrás del sign-in.
 const dbLayer = require('./lib/db');
-const { registerAuthRoutes, requireAuth } = require('./lib/auth');
+const { registerAuthRoutes, requireAuth, parseCookies } = require('./lib/auth');
 registerAuthRoutes(app);
 
 // V2.8: PUERTA DE ARRANQUE. Hasta que Mongo esté conectado y el estado cargado,
@@ -179,6 +179,60 @@ registerAuthRoutes(app);
 app.use((req, res, next) => {
     if (mongoReady || req.path === '/health') return next();
     res.status(503).json({ error: 'Arrancando (conectando a la base de datos)…', code: 'STARTING' });
+});
+
+// ============================================================
+// V2.9: VERSIÓN WEB vs VERSIÓN MÓVIL (dos frontends separados)
+// ============================================================
+// El dashboard de escritorio (public/index.html + app.js, ~3.300 líneas y 9 tabs)
+// no se puede "responsivizar" a un teléfono sin castrarlo: en móvil lo que se quiere
+// es entrar y ver cuánto vale lo que tienes. Por eso hay DOS frontends independientes
+// que comparten servidor, API y sesión:
+//   - Escritorio: public/index.html  + app.js  + style.css   (todo el dashboard)
+//   - Móvil:      public/mobile/*                            (login + Mi Portafolio)
+// Ambos consumen los MISMOS endpoints (/api/auth/*, /api/portfolio, /api/settings),
+// así que no hay lógica de negocio duplicada: solo capa de presentación distinta.
+//
+// Decisión de ruta: una sola URL pública. En "/" se decide por User-Agent, con una
+// cookie "viewMode" como escape manual en ambos sentidos (un móvil puede pedir el
+// escritorio y un escritorio puede previsualizar el móvil). La cookie NO es HttpOnly
+// a propósito: es una preferencia de UI, no un secreto, y así el frontend podría
+// leerla si algún día hace falta. Nunca influye en permisos ni en datos.
+const MOBILE_UA_RE = /Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Mobile Safari|Windows Phone/i;
+// Tablets fuera: en una pantalla de 10" el dashboard completo se usa bien.
+const TABLET_UA_RE = /iPad|Tablet|PlayBook|Silk|Android(?!.*Mobile)/i;
+
+function isMobileUserAgent(ua) {
+    if (!ua) return false;
+    if (TABLET_UA_RE.test(ua)) return false;
+    return MOBILE_UA_RE.test(ua);
+}
+
+// 'mobile' | 'desktop' — la cookie (elección explícita del usuario) manda sobre el UA.
+function resolveView(req) {
+    const forced = parseCookies(req).viewMode;
+    if (forced === 'mobile' || forced === 'desktop') return forced;
+    return isMobileUserAgent(req.headers['user-agent']) ? 'mobile' : 'desktop';
+}
+
+function viewModeCookie(mode) {
+    // 180 días; Lax (no Strict) para que sobreviva a llegar desde un enlace externo.
+    // Secure solo en producción, igual que la cookie de sesión (en local es http).
+    return `viewMode=${mode}; Path=/; SameSite=Lax; Max-Age=${180 * 24 * 3600}${IS_PROD ? '; Secure' : ''}`;
+}
+
+const DESKTOP_HTML = path.join(__dirname, 'public', 'index.html');
+const MOBILE_HTML = path.join(__dirname, 'public', 'mobile', 'index.html');
+
+// Conmutadores explícitos. Redirigen a "/" para que la URL quede limpia (una sola
+// dirección que compartir) y la cookie recién fijada decida qué se sirve.
+app.get('/m', (req, res) => {
+    res.setHeader('Set-Cookie', viewModeCookie('mobile'));
+    res.redirect('/');
+});
+app.get('/desktop', (req, res) => {
+    res.setHeader('Set-Cookie', viewModeCookie('desktop'));
+    res.redirect('/');
 });
 
 // Ajustes por usuario (claves permitidas explícitamente: nada arbitrario en BD)
@@ -3227,8 +3281,12 @@ async function refreshAllData() {
     }, 300000);
 })();
 
-// Servir la carpeta estática "public" donde estará el frontend
-app.use(express.static(path.join(__dirname, 'public')));
+// Servir la carpeta estática "public" donde estará el frontend.
+// V2.9 — index:false: sin esto, express.static respondía "/" con public/index.html
+// ANTES de llegar a app.get('/'), que quedaba muerto. Ahora "/" lo resuelve el
+// router de vista (escritorio vs móvil) más abajo. Los ficheros concretos
+// (/style.css, /mobile/mobile.js, /vendor/...) los sigue sirviendo este middleware.
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 // Endpoint GET /api/data - Envía el contenido del JSON al frontend
 // V2.3: requiere sesión — el dashboard entero queda detrás del sign-in.
@@ -3663,9 +3721,14 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Ruta principal para servir index.html
+// Ruta principal: decide QUÉ frontend se sirve (ver el bloque "VERSIÓN WEB vs
+// VERSIÓN MÓVIL" al inicio del archivo). Una sola URL para ambas versiones.
+// Vary: Cookie + User-Agent para que ningún proxy/CDN cachee la versión de
+// escritorio y se la sirva luego a un teléfono (o al revés).
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    const view = resolveView(req);
+    res.setHeader('Vary', 'Cookie, User-Agent');
+    res.sendFile(view === 'mobile' ? MOBILE_HTML : DESKTOP_HTML);
 });
 
 // Iniciar el servidor

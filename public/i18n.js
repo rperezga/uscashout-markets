@@ -371,7 +371,25 @@
         'acc.guardar': 'Change password',
         'acc.nota': 'Changing it will sign out sessions on other devices. Minimum 8 characters.',
         'acc.noCoincide': 'The new passwords do not match.',
-        'acc.ok': '✓ Password changed successfully.'
+        'acc.ok': '✓ Password changed successfully.',
+
+        // --- V2.9: VERSIÓN MÓVIL (public/mobile/*) ---
+        // Namespace "m.*" para lo que SOLO existe en el frontend móvil. Todo lo que
+        // comparte con el escritorio (auth.*, acc.*, nav.portfolio, btn.salir…) reusa
+        // las claves de arriba: un solo sitio que traducir.
+        'm.authSub': 'Your portfolio lives behind your account.',
+        'm.verEscritorio': 'Open full version',
+        'm.cuenta': 'Account',
+        'm.idioma': 'Language',
+        'm.masOpciones': 'More',
+        'm.escritorioNota': 'The full version has market, technicals, whales, derivatives and live burn. It is built for a big screen.',
+        'm.valorTotal': 'Total value',
+        'm.rendimiento': 'Performance',
+        'm.granDia': 'Day',
+        'm.granSemana': 'Week',
+        'm.granMes': 'Month',
+        'm.tusMonedas': 'Your coins',
+        'm.desdeInicio': 'Since start'
     };
 
     let lang = 'es';
