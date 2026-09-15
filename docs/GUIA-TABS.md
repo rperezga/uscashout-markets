@@ -4,6 +4,14 @@ Documentación funcional del dashboard, tab por tab. Cada gráfica incluye una *
 
 Convención de colores de las lecturas: verde = implicación alcista, rojo = bajista, ámbar = precaución/aviso, azul = contexto neutro.
 
+## Versión móvil (v2.9)
+
+Desde un teléfono, `uscashout.com` (o `localhost:3000`) sirve una **versión distinta**, no el mismo dashboard encogido: el de escritorio son 9 páginas pensadas para un grid de 6 columnas, y en un móvil lo que se quiere es entrar y ver cuánto vale lo que tienes. La versión móvil tiene **login** y **Mi Portafolio** (valor total, cambio 24h, P&L a 24h/7d/30d/desde inicio, gráfica de rendimiento con vista día/semana/mes y lista de tus monedas), más una pestaña **Cuenta** con idioma, cambio de contraseña y cerrar sesión.
+
+Es la misma cuenta y los mismos datos: comparten sesión y endpoints, así que lo que edites en "My Crypto" de la versión completa se refleja aquí (las cantidades **solo** se editan allí — una sola fuente de verdad).
+
+**Cómo cambiar de versión:** desde el móvil, "Ver versión completa" (o `/desktop`) te lleva al dashboard entero y lo recuerda. Desde un PC, `/m` muestra la versión móvil sin necesidad de un teléfono — útil para revisarla. La preferencia se guarda en una cookie (`viewMode`) durante 180 días; las tablets reciben la versión completa a propósito.
+
 ## Navegación (v2.4)
 
 La barra de navegación vive en su propia fila bajo el header y agrupa las 9 páginas en 4 secciones: **Inicio** (Resumen), **Mercado** (Mercado, Noticias, Derivados), **Análisis** (Análisis, Técnico) y **On-Chain** (Ballenas, Suministro, Quema en Vivo). En pantallas estrechas la barra scrollea en horizontal y oculta las etiquetas de grupo. El dashboard recuerda el último tab visitado entre recargas (dato no crítico, `localStorage`). Cada página lleva un acento de color en el borde izquierdo de sus tarjetas como guía visual: violeta = Análisis, ámbar = Técnico, celeste = Noticias, índigo = Derivados, azul = Suministro, rojo = Quema.
