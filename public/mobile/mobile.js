@@ -79,6 +79,23 @@
         if (boot) boot.hidden = true;
     }
 
+    // Barra de escape a la versión completa. Se muestra SOLO si existe la cookie
+    // viewMode=mobile, o sea si alguien pidió expresamente el móvil entrando por /m
+    // (en un teléfono normal la versión móvil llega por User-Agent y no hay cookie).
+    // Es la salida de un atrapamiento real: abrir /m desde un portátil dejaba la
+    // cookie puesta 180 días y el escritorio no volvía a aparecer.
+    function setupViewBar() {
+        try {
+            const bar = $('m-viewbar');
+            if (!bar) return;
+            const forced = document.cookie.split(';').some(c => c.trim() === 'viewMode=mobile');
+            if (!forced) return;
+            bar.textContent = _pick('Estás viendo la versión móvil · Ver versión completa →',
+                                    'You are viewing the mobile version · Open full version →');
+            bar.hidden = false;
+        } catch (e) { /* si falla, simplemente no se muestra la barra */ }
+    }
+
     function showAuth() {
         hideBoot();
         $('m-auth').hidden = false;
@@ -97,6 +114,7 @@
         hideBoot();
         $('m-auth').hidden = true;
         $('m-app').hidden = false;
+        setupViewBar();
         startAutoRefresh();
     }
 
@@ -830,6 +848,7 @@
                 setAuthMode(_authMode);
                 syncLangSeg();
                 paintAccount();
+                setupViewBar();
                 if (!$('m-app').hidden) loadPortfolio({ silent: true });
                 // Las monedas ya están en memoria: basta repintar con el idioma nuevo
                 // (los textos del brief vienen bilingües del servidor).

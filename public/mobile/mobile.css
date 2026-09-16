@@ -196,6 +196,19 @@ form input:focus {
    ============================================================ */
 .m-app { min-height: 100dvh; display: flex; flex-direction: column; }
 
+/* Barra de escape a la versión completa (ver comentario en index.html) */
+.m-viewbar {
+    display: block;
+    padding: calc(8px + var(--safe-t)) 16px 8px;
+    text-align: center;
+    font-size: 0.78rem; font-weight: 600;
+    color: #04121f; text-decoration: none;
+    background: linear-gradient(135deg, #38bdf8, var(--accent));
+}
+/* Con la barra visible, la cabecera ya no puede pegarse arriba del todo ni repetir
+   el safe-area inset: lo aporta la barra. */
+.m-viewbar:not([hidden]) + .m-header { position: static; padding-top: 10px; }
+
 .m-header {
     position: sticky; top: 0; z-index: 20;
     display: flex; align-items: center; justify-content: space-between;
@@ -536,11 +549,14 @@ form input:focus {
 .m-signal-dot.pos { background: var(--pos); }
 .m-signal-dot.neg { background: var(--neg); }
 .m-signal-dot.warn { background: var(--warn); }
+/* display:block obligatorio: son <span> dentro de un <span>, y en línea el
+   margin-top no aplica — el área y el texto salían pegados ("MOMENTUMMACD positivo…"). */
 .m-signal-area {
+    display: block;
     font-size: 0.66rem; font-weight: 800; color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.06em;
 }
-.m-signal-txt { margin-top: 3px; font-size: 0.85rem; line-height: 1.5; color: #e2e8f0; }
+.m-signal-txt { display: block; margin-top: 3px; font-size: 0.85rem; line-height: 1.5; color: #e2e8f0; }
 
 /* Rejilla de datos (niveles, métricas) */
 .m-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }

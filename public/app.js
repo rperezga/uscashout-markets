@@ -3960,3 +3960,32 @@ document.addEventListener('DOMContentLoaded', () => {
         loadDashboardData();
     });
 });
+
+// ============================================================
+// V2.9: SALIDA HACIA LA VERSIÓN MÓVIL (bloque autónomo, no toca nada de arriba)
+// ============================================================
+// Simétrico a la barra de la versión móvil. Caso real: desde el móvil pulsas "Ver
+// versión completa" (o entras por /desktop), eso fija la cookie viewMode=desktop
+// durante 180 días y la detección por User-Agent deja de aplicarse — el teléfono
+// se queda con el dashboard de 9 pestañas para siempre y sin ninguna forma visible
+// de volver. Esta barra aparece SOLO en ese estado concreto: cookie de escritorio
+// puesta Y pantalla estrecha. En un monitor no se ve nunca.
+(function mobileEscapeBar() {
+    try {
+        const forcedDesktop = document.cookie.split(';').some(c => c.trim() === 'viewMode=desktop');
+        if (!forcedDesktop) return;
+        if (window.innerWidth >= 820) return; // pantalla grande: no hay nada que ofrecer
+
+        const bar = document.createElement('a');
+        bar.href = '/m';
+        bar.id = 'mobile-escape-bar';
+        // Estilos en línea a propósito: es un elemento aislado de 3 líneas y así el
+        // bloque entero vive en un solo sitio (la CSP permite style-src 'unsafe-inline').
+        bar.style.cssText = 'display:block;padding:10px 16px;text-align:center;font-size:0.85rem;' +
+            'font-weight:600;color:#04121f;text-decoration:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);';
+        bar.textContent = (window.getLang && window.getLang() === 'en')
+            ? 'Small screen detected · Switch to the mobile version →'
+            : 'Pantalla pequeña · Cambiar a la versión móvil →';
+        document.body.insertBefore(bar, document.body.firstChild);
+    } catch (e) { /* si falla, el dashboard sigue funcionando igual */ }
+})();
