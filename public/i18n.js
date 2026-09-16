@@ -389,7 +389,8 @@
         'm.granSemana': 'Week',
         'm.granMes': 'Month',
         'm.tusMonedas': 'Your coins',
-        'm.desdeInicio': 'Since start'
+        'm.desdeInicio': 'Since start',
+        'm.monedas': 'Coins'
     };
 
     let lang = 'es';

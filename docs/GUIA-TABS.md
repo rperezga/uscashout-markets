@@ -6,7 +6,13 @@ Convención de colores de las lecturas: verde = implicación alcista, rojo = baj
 
 ## Versión móvil (v2.9)
 
-Desde un teléfono, `uscashout.com` (o `localhost:3000`) sirve una **versión distinta**, no el mismo dashboard encogido: el de escritorio son 9 páginas pensadas para un grid de 6 columnas, y en un móvil lo que se quiere es entrar y ver cuánto vale lo que tienes. La versión móvil tiene **login** y **Mi Portafolio** (valor total, cambio 24h, P&L a 24h/7d/30d/desde inicio, gráfica de rendimiento con vista día/semana/mes y lista de tus monedas), más una pestaña **Cuenta** con idioma, cambio de contraseña y cerrar sesión.
+Desde un teléfono, `uscashout.com` (o `localhost:3000`) sirve una **versión distinta**, no el mismo dashboard encogido: el de escritorio son 9 páginas pensadas para un grid de 6 columnas, y en un móvil lo que se quiere es entrar y ver cuánto vale lo que tienes. La versión móvil tiene **login** y tres pestañas:
+
+**Mi Portafolio** — valor total, cambio 24h, P&L a 24h/7d/30d/desde inicio, gráfica de rendimiento con vista día/semana/mes y lista de tus monedas.
+
+**Monedas** — las 9 monedas que sigue el panel con su precio, cambio 24h y score. Al tocar una entras en su ficha: el veredicto en cristiano (el mismo `dailyBrief` del Resumen de escritorio), el score con su sesgo, los niveles de soporte/resistencia/psicológico, RSI, distancia a la media de 200 días, capitalización, y las señales concretas que sustentan el veredicto. Si abres una moneda con datos fríos, el panel la refresca en ese momento — **sin cambiar la moneda activa de tu escritorio**, que se queda donde la dejaste. Cada ficha indica cuándo se actualizó por última vez.
+
+**Cuenta** — idioma, cambio de contraseña y cerrar sesión.
 
 Es la misma cuenta y los mismos datos: comparten sesión y endpoints, así que lo que edites en "My Crypto" de la versión completa se refleja aquí (las cantidades **solo** se editan allí — una sola fuente de verdad).
 

@@ -3445,24 +3445,50 @@ async function _currentPortfolioTotal(userId) {
         priceMap = _portfolioPriceCache.data;
     } else {
         try {
-            const resp = await coingeckoFetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=usd`);
+            // Bugfix (v2.9): esta llamada pedía /simple/price SIN include_24hr_change mientras
+            // /api/portfolio lo pedía CON él, compartiendo la misma caché — según quién la
+            // llenara primero, las entradas traían el cambio 24h o no. Ahora ambas piden lo
+            // mismo, así que la caché es consistente y aquí se puede calcular el 24h.
+            const resp = await coingeckoFetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true`);
             if (resp.ok) { priceMap = await resp.json(); _portfolioPriceCache = { at: now, ids, data: priceMap }; }
         } catch (e) { /* cae a stored */ }
     }
     let stored = {};
     try { stored = readState() || {}; } catch (e) { stored = {}; }
-    const storedPrice = (id) => id === 'ripple'
-        ? (stored.marketData && stored.marketData.price)
-        : (stored.coins && stored.coins[id] && stored.coins[id].marketData && stored.coins[id].marketData.price);
+    const storedNode = (id) => id === 'ripple'
+        ? (stored.marketData || null)
+        : ((stored.coins && stored.coins[id] && stored.coins[id].marketData) || null);
 
     let total = 0, complete = true;
+    // Valor de hace 24h, para el P&L de 1 día: por moneda, value / (1 + cambio%/100).
+    // Es EXACTAMENTE el mismo método que usa /api/portfolio para su cambio 24h, de forma
+    // que el chip "24h" y el titular del portafolio no puedan contradecirse.
+    let value24hAgo = 0;
+    let change24hKnown = false;
     for (const h of held) {
+        const node = storedNode(h.id);
         let price = (priceMap && priceMap[h.id] && typeof priceMap[h.id].usd === 'number') ? priceMap[h.id].usd : null;
-        if (price == null) { const sp = storedPrice(h.id); price = (typeof sp === 'number') ? sp : null; }
+        let chg = (priceMap && priceMap[h.id] && typeof priceMap[h.id].usd_24h_change === 'number') ? priceMap[h.id].usd_24h_change : null;
+        if (price == null) { const sp = node && node.price; price = (typeof sp === 'number') ? sp : null; }
+        if (chg == null) { const sc = node && node.priceChange24h; chg = (typeof sc === 'number') ? sc : null; }
         if (price == null) { complete = false; continue; }
-        total += h.amount * price;
+
+        const value = h.amount * price;
+        total += value;
+        if (chg != null && (1 + chg / 100) !== 0) { value24hAgo += value / (1 + chg / 100); change24hKnown = true; }
+        else { value24hAgo += value; } // sin cambio conocido: neutro, no inventamos movimiento
     }
-    return { total: Math.round(total * 100) / 100, complete, count: held.length };
+
+    const change24hValue = change24hKnown ? (total - value24hAgo) : null;
+    const change24hPct = (change24hKnown && value24hAgo > 0) ? (change24hValue / value24hAgo) * 100 : null;
+
+    return {
+        total: Math.round(total * 100) / 100,
+        complete,
+        count: held.length,
+        change24hValue: change24hValue != null ? Math.round(change24hValue * 100) / 100 : null,
+        change24hPct: change24hPct != null ? Math.round(change24hPct * 100) / 100 : null
+    };
 }
 
 app.get('/api/portfolio/history', requireAuth, async (req, res) => {
@@ -3532,8 +3558,17 @@ app.get('/api/portfolio/history', requireAuth, async (req, res) => {
         // estas monedas entonces). Si aún no hay snapshots, el ancla es el valor de hoy → 0%.
         const anchorVal = snaps.length ? snaps[0].totalValue : cur.total;
         const anchorDate = snaps.length ? snaps[0].date : today;
+        // Bugfix (v2.9): el chip "24h" salía de la serie DIARIA (valor de hoy contra el
+        // snapshot del día anterior), mientras el titular del portafolio usa el cambio
+        // RODANTE de 24h de CoinGecko. Eran dos cosas distintas con la misma etiqueta y
+        // se contradecían en pantalla (−9,40% en el titular junto a −0,01% en el chip).
+        // Ahora d1 usa la misma fuente rodante; 7d/30d siguen saliendo del histórico
+        // diario, que para esos plazos sí es la medida correcta.
+        const d1Rolling = (cur.change24hValue != null && cur.change24hPct != null)
+            ? { abs: cur.change24hValue, pct: cur.change24hPct, source: 'rolling24h' }
+            : null;
         const pnl = {
-            d1: pnlFor(1), d7: pnlFor(7), d30: pnlFor(30),
+            d1: d1Rolling || pnlFor(1), d7: pnlFor(7), d30: pnlFor(30),
             sinceStart: (anchorVal != null && anchorVal > 0 && latest != null)
                 ? { abs: Math.round((latest - anchorVal) * 100) / 100, pct: Math.round((latest - anchorVal) / anchorVal * 10000) / 100, from: anchorDate }
                 : null,
@@ -3593,6 +3628,122 @@ app.get('/api/coins', requireAuth, (req, res) => {
             hasDerivatives: !!(c.kraken || c.okx) || !!c.legacy
         }))
     });
+});
+
+// ============================================================
+// V2.9: RESUMEN DE TODAS LAS MONEDAS (para el tab "Monedas" del móvil)
+// ============================================================
+// GET /api/coins/summary — lo esencial de CADA moneda en una sola respuesta:
+// precio, 24h, score, veredicto del brief y niveles. Existe porque /api/data
+// devuelve el estado COMPLETO (cientos de KB con gráficas, ballenas, noticias…)
+// y el móvil solo necesita una foto por moneda.
+//
+// XRP va por la ruta legacy (sus nodos viven en la raíz del estado, no en
+// coins.ripple), así que para él `node` apunta a la raíz y para el resto a
+// coins.<id>. Ese es el único caso especial de todo el endpoint.
+app.get('/api/coins/summary', requireAuth, (req, res) => {
+    try {
+        const data = readState();
+        const now = Date.now();
+        const ageMin = (iso) => iso ? Math.round((now - new Date(iso).getTime()) / 60000) : null;
+
+        const summary = COINS.map(c => {
+            // Fuente de los nodos: raíz para XRP, coins.<id> para el resto
+            const node = c.legacy ? data : ((data.coins && data.coins[c.id]) || {});
+            const md = node.marketData || {};
+            const am = node.advancedMetrics || {};
+            const brief = node.dailyBrief || {};
+            const t = node.technicals || {};
+
+            // Los niveles del brief ya están calculados; si no hay brief todavía,
+            // se cae a technicals para no dejar la ficha vacía.
+            const niveles = brief.niveles || {};
+
+            return {
+                id: c.id,
+                symbol: c.symbol,
+                name: c.name,
+                iso20022: !!c.iso20022,
+                legacy: !!c.legacy,
+
+                price: md.price != null ? md.price : null,
+                change24hPct: md.priceChange24h != null ? md.priceChange24h : null,
+                marketCap: md.marketCap != null ? md.marketCap : null,
+                volume24h: md.volume24h != null ? md.volume24h : null,
+
+                score: am.compositeScore ? {
+                    value: am.compositeScore.value,
+                    label: am.compositeScore.label,
+                    labelEn: am.compositeScore.labelEn
+                } : null,
+
+                // El veredicto en cristiano + las señales que lo sustentan (bilingüe,
+                // el frontend elige con _pick). Es lo que da valor a la ficha.
+                brief: brief.headline ? {
+                    headline: brief.headline,
+                    headlineEn: brief.headlineEn,
+                    tone: brief.tone,
+                    señales: Array.isArray(brief.señales) ? brief.señales : []
+                } : null,
+
+                levels: {
+                    support: niveles.soporte != null ? niveles.soporte : (t.support != null ? t.support : null),
+                    resistance: niveles.resistencia != null ? niveles.resistencia : (t.resistance != null ? t.resistance : null),
+                    psychological: niveles.psicologico != null ? niveles.psicologico : null
+                },
+
+                trendVsSma200Pct: (am.trend && am.trend.priceVsSma200Pct != null) ? am.trend.priceVsSma200Pct : null,
+                rsi14: (am.momentum && am.momentum.rsi14 != null) ? am.momentum.rsi14 : null,
+
+                updatedAt: md.lastUpdated || null,
+                ageMinutes: ageMin(md.lastUpdated),
+                hasData: md.price != null
+            };
+        });
+
+        res.json({ coins: summary, generatedAt: new Date().toISOString() });
+    } catch (error) {
+        console.error('Error en /api/coins/summary:', error);
+        res.status(500).json({ error: 'No se pudo construir el resumen de monedas.' });
+    }
+});
+
+// POST /api/coins/refresh — refresca UNA moneda SIN cambiar la moneda activa.
+// Diferencia con /api/coins/activate: aquel persiste `activeCoin` en los ajustes
+// del usuario, que comparten móvil y escritorio. Al navegar por el tab "Monedas"
+// del móvil eso haría que el escritorio saltara a la última moneda mirada en el
+// teléfono, que no es lo que nadie espera. Este endpoint solo trae datos.
+const _coinRefreshCooldown = {}; // id -> timestamp del último refresco pedido
+app.post('/api/coins/refresh', requireAuth, async (req, res) => {
+    try {
+        const id = req.body && req.body.id;
+        const coin = coinById(id);
+        if (!coin) return res.status(400).json({ error: 'Moneda no soportada.' });
+        // XRP tiene su propio ciclo completo cada 5 min: no hay nada que forzar.
+        if (coin.legacy) return res.json({ ok: true, coin: coin.id, refreshed: false, reason: 'legacy' });
+
+        // Anti-estampida: como mucho un refresco por moneda cada 60 s, pase lo que pase.
+        const last = _coinRefreshCooldown[coin.id] || 0;
+        if (Date.now() - last < 60000) return res.json({ ok: true, coin: coin.id, refreshed: false, reason: 'cooldown' });
+
+        // ¿Datos fríos? Mismo criterio que activate: FASE A de hace más de 5 min.
+        let needsFast = true;
+        try {
+            const data = readState();
+            const lastFast = data.coins && data.coins[coin.id] && data.coins[coin.id].lastFastAt;
+            needsFast = !lastFast || (Date.now() - new Date(lastFast).getTime()) > 5 * 60000;
+        } catch (e) { /* ante la duda, refrescar */ }
+
+        if (!needsFast) return res.json({ ok: true, coin: coin.id, refreshed: false, reason: 'fresh' });
+
+        _coinRefreshCooldown[coin.id] = Date.now();
+        await refreshCoinGeneric(coin.id, { fastOnly: true });          // unos segundos
+        refreshCoinGeneric(coin.id).catch(() => { /* FASE B en segundo plano */ });
+        res.json({ ok: true, coin: coin.id, refreshed: true });
+    } catch (error) {
+        console.error('Error refrescando moneda:', error);
+        res.status(500).json({ error: 'No se pudo refrescar la moneda.' });
+    }
 });
 
 // Activa una moneda: la marca como prioritaria para el ciclo y, si sus datos

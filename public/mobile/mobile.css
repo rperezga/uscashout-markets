@@ -430,6 +430,136 @@ form input:focus {
 @keyframes m-shimmer { from { background-position: 180% 0; } to { background-position: -40% 0; } }
 
 /* ============================================================
+   MONEDAS (lista + detalle)
+   ============================================================ */
+.m-coin-row {
+    display: grid;
+    grid-template-columns: 42px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 13px 14px;
+    margin-bottom: 9px;
+    text-align: left;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.m-coin-row:active { transform: scale(0.995); }
+
+.m-coin-badge {
+    width: 42px; height: 42px;
+    display: grid; place-items: center;
+    font-size: 0.7rem; font-weight: 800; letter-spacing: -0.02em;
+    color: var(--accent);
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.28);
+    border-radius: 12px;
+}
+.m-coin-name { font-size: 0.95rem; font-weight: 600; }
+.m-coin-sub { font-size: 0.75rem; color: var(--dim); }
+.m-coin-right { text-align: right; }
+.m-coin-price { font-size: 0.95rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.m-coin-chg { font-size: 0.76rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.m-coin-chg.pos { color: #86efac; }
+.m-coin-chg.neg { color: #fca5a5; }
+.m-coin-chg.muted { color: var(--dim); }
+
+/* Chip de score: el color comunica el sesgo de un vistazo */
+.m-score {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 0.68rem; font-weight: 800;
+    border-radius: 999px;
+    font-variant-numeric: tabular-nums;
+}
+.m-score.pos { color: #86efac; background: rgba(34, 197, 94, 0.14); }
+.m-score.neg { color: #fca5a5; background: rgba(239, 68, 68, 0.14); }
+.m-score.mid { color: #fcd34d; background: rgba(245, 158, 11, 0.14); }
+.m-score.muted { color: var(--dim); background: rgba(255, 255, 255, 0.06); }
+
+.m-iso { font-size: 0.6rem; font-weight: 700; color: var(--dim); letter-spacing: 0.04em; }
+
+/* Cabecera del detalle */
+.m-detail-head {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 14px;
+}
+.m-back {
+    width: 40px; height: 40px; flex: 0 0 40px;
+    display: grid; place-items: center;
+    font-size: 1.4rem; line-height: 1;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    cursor: pointer;
+}
+.m-detail-title { font-size: 1.05rem; font-weight: 700; }
+.m-detail-sub { font-size: 0.75rem; color: var(--dim); }
+
+/* Veredicto del brief */
+.m-verdict {
+    padding: 14px;
+    margin-bottom: 14px;
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: var(--radius-sm);
+    background: var(--card);
+}
+.m-verdict.pos { border-left-color: var(--pos); background: rgba(34, 197, 94, 0.07); }
+.m-verdict.neg { border-left-color: var(--neg); background: rgba(239, 68, 68, 0.07); }
+.m-verdict.info { border-left-color: var(--accent); background: rgba(14, 165, 233, 0.07); }
+.m-verdict-lbl {
+    font-size: 0.68rem; font-weight: 800; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.07em;
+}
+.m-verdict-txt { margin-top: 6px; font-size: 0.92rem; line-height: 1.5; }
+
+/* Señales del brief */
+.m-signal {
+    display: grid;
+    grid-template-columns: 8px 1fr;
+    gap: 10px;
+    padding: 11px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.m-signal:last-child { border-bottom: none; padding-bottom: 0; }
+.m-signal-dot {
+    width: 8px; height: 8px; margin-top: 6px;
+    border-radius: 50%;
+    background: var(--dim);
+}
+.m-signal-dot.pos { background: var(--pos); }
+.m-signal-dot.neg { background: var(--neg); }
+.m-signal-dot.warn { background: var(--warn); }
+.m-signal-area {
+    font-size: 0.66rem; font-weight: 800; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+}
+.m-signal-txt { margin-top: 3px; font-size: 0.85rem; line-height: 1.5; color: #e2e8f0; }
+
+/* Rejilla de datos (niveles, métricas) */
+.m-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.m-kv-item {
+    padding: 11px 12px;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.m-kv-lbl {
+    display: block;
+    font-size: 0.66rem; font-weight: 700; color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.05em;
+}
+.m-kv-val { display: block; margin-top: 3px; font-size: 0.92rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.m-kv-val.pos { color: #86efac; }
+.m-kv-val.neg { color: #fca5a5; }
+
+/* ============================================================
    CUENTA
    ============================================================ */
 .m-acc-user { display: flex; align-items: center; gap: 13px; }

@@ -255,6 +255,9 @@
         document.querySelectorAll('.m-view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
         document.querySelectorAll('.m-nav-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-view') === name));
         window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+        // Carga perezosa: el resumen de monedas solo se pide la primera vez que
+        // entras al tab, no en cada arranque de la app.
+        if (name === 'coins' && !_coinsCache) loadCoins();
     }
 
     function paintAccount() {
@@ -553,6 +556,223 @@
         }
     }
 
+    // ============================================================
+    // MONEDAS (lista de todas + ficha de detalle)
+    // ============================================================
+    // Se alimenta de /api/coins/summary: una sola respuesta con lo esencial de las
+    // 9 monedas. Al abrir una moneda fría se pide /api/coins/refresh, que trae datos
+    // frescos SIN cambiar la moneda activa de la cuenta (el escritorio no se entera).
+
+    let _coinsCache = null;
+    let _coinsLoading = false;
+    let _openCoinId = null;
+
+    function scoreClass(v) {
+        if (v == null) return 'muted';
+        if (v >= 65) return 'pos';
+        if (v <= 40) return 'neg';
+        return 'mid';
+    }
+
+    async function loadCoins(opts) {
+        if (_coinsLoading) return;
+        _coinsLoading = true;
+        const silent = opts && opts.silent;
+        try {
+            const resp = await fetch('/api/coins/summary');
+            if (resp.status === 401) { showAuth(); return; }
+            if (!resp.ok) throw new Error('coins ' + resp.status);
+            const json = await resp.json();
+            _coinsCache = Array.isArray(json.coins) ? json.coins : [];
+            // Si hay una ficha abierta, repintarla con el dato nuevo; si no, la lista.
+            if (_openCoinId) renderCoinDetail(_openCoinId); else renderCoinsList();
+        } catch (e) {
+            console.error('Error cargando el resumen de monedas:', e);
+            if (!silent) {
+                $('m-coins-list').innerHTML =
+                    '<div class="m-empty"><div class="m-empty-ico">⚠️</div><p>' +
+                    _esc(_pick('No se pudo cargar el resumen de monedas.', 'Could not load the coin summary.')) +
+                    '</p></div>';
+            }
+        } finally {
+            _coinsLoading = false;
+        }
+    }
+
+    function renderCoinsList() {
+        try {
+            const list = $('m-coins-list');
+            const detail = $('m-coin-detail');
+            if (!list) return;
+            detail.hidden = true;
+            list.hidden = false;
+            _openCoinId = null;
+
+            if (!_coinsCache || _coinsCache.length === 0) {
+                list.innerHTML = '<div class="m-empty"><div class="m-empty-ico">🪙</div><p>' +
+                    _esc(_pick('Todavía no hay datos de monedas.', 'No coin data yet.')) + '</p></div>';
+                return;
+            }
+
+            let html = '<div class="m-reading"><span class="m-reading-ico">🧭</span><span>' +
+                _esc(_pick(
+                    'Las ' + _coinsCache.length + ' monedas que sigue el panel. Toca una para ver su veredicto, su score y los niveles que vigila el mercado.',
+                    'The ' + _coinsCache.length + ' coins this dashboard tracks. Tap one to see its verdict, score and the levels the market watches.')) +
+                '</span></div>';
+
+            for (const c of _coinsCache) {
+                const chgCls = (c.change24hPct == null) ? 'muted' : (c.change24hPct >= 0 ? 'pos' : 'neg');
+                const sc = c.score && c.score.value != null ? c.score.value : null;
+                html += '<button class="m-coin-row" type="button" data-coin="' + _esc(c.id) + '">' +
+                    '<span class="m-coin-badge">' + _esc(c.symbol) + '</span>' +
+                    '<span>' +
+                    '<span class="m-coin-name">' + _esc(c.name) + '</span><br>' +
+                    '<span class="m-coin-sub">' +
+                    (sc != null ? '<span class="m-score ' + scoreClass(sc) + '">' + sc + '/100</span> ' : '') +
+                    (c.iso20022 ? '<span class="m-iso">ISO 20022</span>' : '') +
+                    (c.hasData ? '' : _esc(_pick('sin datos aún', 'no data yet'))) +
+                    '</span>' +
+                    '</span>' +
+                    '<span class="m-coin-right">' +
+                    '<span class="m-coin-price">' + _esc(_fmtPrice(c.price)) + '</span><br>' +
+                    '<span class="m-coin-chg ' + chgCls + '">' + _esc(c.change24hPct == null ? '--' : _pct(c.change24hPct)) + '</span>' +
+                    '</span>' +
+                    '</button>';
+            }
+            list.innerHTML = html;
+        } catch (e) {
+            console.error('Error renderizando la lista de monedas:', e);
+        }
+    }
+
+    async function openCoin(id) {
+        _openCoinId = id;
+        renderCoinDetail(id);
+        window.scrollTo({ top: 0 });
+
+        // Si los datos están tibios, pedir refresco SIN tocar la moneda activa.
+        const c = (_coinsCache || []).find(x => x.id === id);
+        if (!c || c.legacy) return;
+        if (c.ageMinutes != null && c.ageMinutes < 5 && c.hasData) return;
+        try {
+            const resp = await fetch('/api/coins/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+            if (!resp.ok) return;
+            const j = await resp.json();
+            if (j.refreshed) await loadCoins({ silent: true }); // repinta la ficha abierta
+        } catch (e) { /* si falla, se queda con lo cacheado y la etiqueta de antigüedad */ }
+    }
+
+    function freshnessText(c) {
+        if (!c.hasData) return _pick('Sin datos todavía para esta moneda.', 'No data yet for this coin.');
+        if (c.ageMinutes == null) return '';
+        if (c.ageMinutes < 1) return _pick('Actualizado hace menos de un minuto.', 'Updated less than a minute ago.');
+        if (c.ageMinutes < 60) return _pick('Actualizado hace ' + c.ageMinutes + ' min.', 'Updated ' + c.ageMinutes + ' min ago.');
+        const h = Math.round(c.ageMinutes / 60);
+        return _pick('Actualizado hace ' + h + ' h.', 'Updated ' + h + 'h ago.');
+    }
+
+    function renderCoinDetail(id) {
+        try {
+            const c = (_coinsCache || []).find(x => x.id === id);
+            const list = $('m-coins-list');
+            const detail = $('m-coin-detail');
+            if (!c || !detail) return;
+
+            list.hidden = true;
+            detail.hidden = false;
+
+            const chgCls = (c.change24hPct == null) ? 'muted' : (c.change24hPct >= 0 ? 'pos' : 'neg');
+            const sc = c.score && c.score.value != null ? c.score.value : null;
+            const scLabel = c.score ? _pick(c.score.label, c.score.labelEn || c.score.label) : null;
+
+            let html = '<div class="m-detail-head">' +
+                '<button class="m-back" type="button" id="m-coin-back" aria-label="Volver">‹</button>' +
+                '<span>' +
+                '<span class="m-detail-title">' + _esc(c.name) + ' · ' + _esc(c.symbol) + '</span><br>' +
+                '<span class="m-detail-sub">' + _esc(freshnessText(c)) + '</span>' +
+                '</span>' +
+                '</div>';
+
+            // Precio + 24h + score
+            html += '<div class="m-hero">' +
+                '<div class="m-hero-label">' + _esc(_pick('Precio', 'Price')) + '</div>' +
+                '<div class="m-hero-value">' + _esc(_fmtPrice(c.price)) + '</div>' +
+                '<div class="m-hero-change ' + (chgCls === 'muted' ? 'pos' : chgCls) + '">' +
+                (c.change24hPct == null ? '--' : ((c.change24hPct >= 0 ? '▲' : '▼') + ' ' + _esc(_pct(c.change24hPct)))) +
+                '</div>' +
+                (sc != null ? '<p class="m-hero-sub">' + _esc(_pick('Score', 'Score')) + ': <span class="m-score ' + scoreClass(sc) + '">' + sc + '/100</span> ' + _esc(scLabel || '') + '</p>' : '') +
+                '</div>';
+
+            // Veredicto del brief — lo más valioso de la ficha
+            if (c.brief && c.brief.headline) {
+                html += '<div class="m-verdict ' + _esc(c.brief.tone || 'info') + '">' +
+                    '<div class="m-verdict-lbl">' + _esc(_pick('Veredicto', 'Verdict')) + '</div>' +
+                    '<div class="m-verdict-txt">' + _esc(_pick(c.brief.headline, c.brief.headlineEn || c.brief.headline)) + '</div>' +
+                    '</div>';
+            }
+
+            // Niveles
+            const lv = c.levels || {};
+            if (lv.support != null || lv.resistance != null || lv.psychological != null) {
+                html += '<div class="m-card"><h3>' + _esc(_pick('Niveles a vigilar', 'Levels to watch')) + '</h3>' +
+                    '<div class="m-kv">' +
+                    '<div class="m-kv-item"><span class="m-kv-lbl">' + _esc(_pick('Soporte 7d', 'Support 7d')) + '</span><span class="m-kv-val pos">' + _esc(_fmtPrice(lv.support)) + '</span></div>' +
+                    '<div class="m-kv-item"><span class="m-kv-lbl">' + _esc(_pick('Resistencia 7d', 'Resistance 7d')) + '</span><span class="m-kv-val neg">' + _esc(_fmtPrice(lv.resistance)) + '</span></div>' +
+                    (lv.psychological != null ? '<div class="m-kv-item"><span class="m-kv-lbl">' + _esc(_pick('Psicológico', 'Psychological')) + '</span><span class="m-kv-val">' + _esc(_fmtPrice(lv.psychological)) + '</span></div>' : '') +
+                    (c.rsi14 != null ? '<div class="m-kv-item"><span class="m-kv-lbl">RSI 14</span><span class="m-kv-val">' + c.rsi14.toFixed(0) + '</span></div>' : '') +
+                    (c.trendVsSma200Pct != null ? '<div class="m-kv-item"><span class="m-kv-lbl">' + _esc(_pick('vs media 200d', 'vs 200d avg')) + '</span><span class="m-kv-val ' + (c.trendVsSma200Pct >= 0 ? 'pos' : 'neg') + '">' + _esc(_pct(c.trendVsSma200Pct, 1)) + '</span></div>' : '') +
+                    (c.marketCap != null ? '<div class="m-kv-item"><span class="m-kv-lbl">' + _esc(_pick('Capitalización', 'Market cap')) + '</span><span class="m-kv-val">$' + _esc(_fmtCompact(c.marketCap)) + '</span></div>' : '') +
+                    '</div>' +
+                    '<p class="m-note">' + _esc(_pick(
+                        'Soporte y resistencia salen de los últimos 7 días; el psicológico es la cifra redonda que el mercado vigila.',
+                        'Support and resistance come from the last 7 days; the psychological level is the round number the market watches.')) + '</p>' +
+                    '</div>';
+            }
+
+            // Señales que sustentan el veredicto
+            if (c.brief && Array.isArray(c.brief.señales) && c.brief.señales.length) {
+                html += '<div class="m-card"><h3>' + _esc(_pick('Por qué', 'Why')) + '</h3>';
+                for (const s of c.brief.señales) {
+                    html += '<div class="m-signal">' +
+                        '<span class="m-signal-dot ' + _esc(s.tone || '') + '"></span>' +
+                        '<span>' +
+                        '<span class="m-signal-area">' + _esc(_pick(s.area, s.areaEn || s.area)) + '</span>' +
+                        '<span class="m-signal-txt">' + _esc(_pick(s.text, s.textEn || s.text)) + '</span>' +
+                        '</span>' +
+                        '</div>';
+                }
+                html += '</div>';
+            }
+
+            if (!c.hasData) {
+                html += '<div class="m-empty"><div class="m-empty-ico">⏳</div><p>' +
+                    _esc(_pick('Esta moneda aún no tiene datos cargados. El panel las refresca por turnos; vuelve en unos minutos.',
+                               'This coin has no data loaded yet. The dashboard refreshes them in rotation; check back in a few minutes.')) +
+                    '</p></div>';
+            }
+
+            html += '<p class="m-note">' + _esc(_pick(
+                'Señales educativas generadas por reglas sobre datos públicos — no es asesoramiento financiero.',
+                'Educational signals generated by rules over public data — not financial advice.')) + '</p>';
+
+            detail.innerHTML = html;
+            const back = $('m-coin-back');
+            if (back) back.addEventListener('click', renderCoinsList);
+        } catch (e) {
+            console.error('Error renderizando la ficha de la moneda:', e);
+        }
+    }
+
+    // Formato compacto para capitalizaciones (1.2B, 340M…)
+    function _fmtCompact(v) {
+        if (v == null || !isFinite(v)) return '--';
+        return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(v);
+    }
+
     // ---------- Auto-refresco ----------
     // Cada 5 min, alineado con el ciclo del servidor. Se pausa con la pestaña oculta:
     // en un móvil, refrescar en segundo plano solo gasta batería y datos.
@@ -580,8 +800,17 @@
             if (btn) showView(btn.getAttribute('data-view'));
         });
 
-        // Refrescar
-        $('m-refresh').addEventListener('click', () => loadPortfolio());
+        // Refrescar: actúa sobre la vista que estés mirando
+        $('m-refresh').addEventListener('click', () => {
+            const coinsActive = document.getElementById('view-coins').classList.contains('active');
+            if (coinsActive) loadCoins(); else loadPortfolio();
+        });
+
+        // Lista de monedas: delegación (las filas se pintan dinámicamente)
+        $('m-coins-list').addEventListener('click', (ev) => {
+            const row = ev.target.closest('.m-coin-row');
+            if (row) openCoin(row.getAttribute('data-coin'));
+        });
 
         // Cuenta
         $('m-logout').addEventListener('click', doLogout);
@@ -602,6 +831,9 @@
                 syncLangSeg();
                 paintAccount();
                 if (!$('m-app').hidden) loadPortfolio({ silent: true });
+                // Las monedas ya están en memoria: basta repintar con el idioma nuevo
+                // (los textos del brief vienen bilingües del servidor).
+                if (_coinsCache) { if (_openCoinId) renderCoinDetail(_openCoinId); else renderCoinsList(); }
             } catch (e) { console.error('Error aplicando el cambio de idioma:', e); }
         });
 
